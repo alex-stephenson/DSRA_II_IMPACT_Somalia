@@ -5,10 +5,13 @@ library(tidyverse)
 library(readxl)
 library(naniar)
 library(openxlsx)
+library(ImpactFunctions)
 source("functions/cleaning_functions.R")
+
 # get the timestamp to more easily keep track of different versions
 date_time_now <- format(Sys.time(), "%b_%d_%Y_%H%M%S")
 raw_data<-read_excel("input/2024_REACH_SOM_DSRA_-_all_versions_-_False_-_2024-03-18-06-22-17.xlsx")
+raw_kobo_data <- ImpactFunctions::get_kobo_data(asset_id = "amnDUBvDnga4UYnYU4g5kz", un = "abdirahmanaia")
 
 version_count <- n_distinct(data_in_processing$`__version__`)
 if (version_count > 1) {
@@ -118,14 +121,35 @@ check_list<-data.frame(name=c("healthcare_coverage is yes and no obstacles",
                                            "grepl(\"*other*\", main_cause_displacement) &!grepl(\"*other*\", main_reasons)",
                                            "grepl(\"*SO\\d+|^\\d*\",village)",
                                          "hh_size!=hh_size_roster" ),
-                       columns_to_clean = c("healthcare_coverage,obstacles_access_hcs",
-                                            "main_cause_displacement,main_reasons",
-                                            "main_cause_displacement,main_reasons",
-                                            "main_cause_displacement,main_reasons",
-                                            "main_cause_displacement,main_reasons",
-                                            "main_cause_displacement,main_reasons",
-                                            "main_cause_displacement,main_reasons",
-                                            "main_cause_displacement,main_reasons",
+                       columns_to_clean = c(
+                                            ### include all of the potential binaries from obstacles_access_hcs, which may need updating
+                                            "healthcare_coverage,
+                                            obstacles_access_hcs/no_issues,
+                                            obstacles_access_hcs/unable_access_medical,
+                                            obstacles_access_hcs/cost_services_medicine,
+                                            obstacles_access_hcs/no_access_qualifi_health_acility,
+                                            obstacles_access_hcs/problem_civil_documents,
+                                            obstacles_access_hcs/public_health_clinic,
+                                            obstacles_access_hcs/public_healthclinic_notopen,
+                                            obstacles_access_hcs/treatment_faraway,
+                                            obstacles_access_hcs/medical_staff_refuse_treatment_groups,
+                                            obstacles_access_hcs/medical_staff_refuse, 
+                                            obstacles_access_hcs/medica_staff_disrespectful_rude,	
+                                            obstacles_access_hcs/no_medicine_pharmacy, 
+                                            obstacles_access_hcs/no_treatment_health_facility, 
+                                            obstacles_access_hcs/health_servicesnot_accessible, 
+                                            obstacles_access_hcs/fear_harassment_violence_healthcare_servic, 
+                                            obstacles_access_hcs/barriers_languag_health_services",#
+                                            
+                                            
+                                            
+                                            "main_cause_displacemen/securit_considerations, main_reasons/relative_safety",
+                                            "main_cause_displacement/economic_migration, main_reasons/economic_migration_current_settlement_name",
+                                            "main_cause_displacement/bad_standards_living, main_reasons/better_standard_living",
+                                            "main_cause_displacement/discrimination ,main_reasons/feeling_community",
+                                            "main_cause_displacement/lack_humanitarian_aid,main_reasons/availability_humanitarian_assistance",
+                                            "main_cause_displacement/far_friend_family,main_reasons/location_friends_family",
+                                            "main_cause_displacement/other,main_reasons/other",
                                             "village",
                                             "hh_size,hh_size_roster"),
                        description =c( "All members of the HH doesnt have access to Healtcare but no obstacles in accessing healthcare",

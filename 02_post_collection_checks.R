@@ -22,26 +22,43 @@ read_and_clean <- function(file, sheet) {
 }
 
 # Read and combine all files into a single dataframe
-cleaning_logs <- map_dfr(file_list, sheet = 'cleaning_log', read_and_clean, .id = "source_file") %>%
-  filter(change_type == 'remove_survey') %>%
-  pull(uuid)
-
+cleaning_logs <- map_dfr(file_list, sheet = 'cleaning_log', read_and_clean)
 
 
 # now read in the deletion log
 
+## all dlogs
+dlogs_path <- r"(03_output\deletion_log)"
 
+# List all .xlsx files that contain 'cleaning_log' in the name
+dlog_list <- list.files(dlogs_path, pattern = "deletion_log.*\\.xlsx$", recursive = TRUE, full.names = TRUE)
+
+all_dlogs <- dlog_list %>%
+  map_dfr(read_excel) %>%
+  pull(uuid)
 
 ## now remove dlog
 
+raw_data <- raw_kobo_data %>%
+  filter(! uuid %in% all_dlogs)
 
 
 ## now apply the clog and the clog using cleaningtools code
 
 
+my_clean_data <- create_clean_data(raw_dataset = raw_data,
+                                   raw_data_uuid_column = "uuid",
+                                   cleaning_log = cleaning_logs, 
+                                   cleaning_log_uuid_column = "uuid",
+                                   cleaning_log_question_column = "question",
+                                   cleaning_log_new_value_column = "new_value",
+                                   cleaning_log_change_type_column = "change_type")
+
+
+
 ## soft duplicates
 
-enum_typos <- data_in_processing %>%
+enum_typos <- my_clean_data %>%
   dplyr::count(enum_code) %>%
   filter(n < 3) %>%
   pull(enum_code)
@@ -92,15 +109,22 @@ writeData(wb, 2, similar_survey_raw_data)
 saveWorkbook(wb, similar_survey_export_path, overwrite = TRUE)
 
 
+
+
 ## over sampling
 
+## step 1 - read in data containing the sample size for each CA / settlement
 
+## step 2 - calculate the number of interviews per CA / settlement, based on the existing data
 
+## step 3 - calculate which sites are oversampled
 
+## step 4 - join to any relevant data that assessment want adding - eg clog info
+
+## output for assessment input and they will make into deletion log
 
 
 ## outliers - not sure if this is necessary as there's just one integer question anyway - HH size
-
 
 
 # we should exclude all questions from outlier checks that aren't integer response types (integer is the only numerical response type)
