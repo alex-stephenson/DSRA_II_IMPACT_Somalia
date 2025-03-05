@@ -2,3 +2,7 @@
 .Rhistory
 .RData
 .Ruserdata
+01_cleaning_logs/
+0_DSSI_scoring\input
+*.csv
+*.xlsx

@@ -10,7 +10,7 @@ source("functions/cleaning_functions.R")
 
 # get the timestamp to more easily keep track of different versions
 date_time_now <- format(Sys.time(), "%b_%d_%Y_%H%M%S")
-raw_data<-read_excel("input/2024_REACH_SOM_DSRA_-_all_versions_-_False_-_2024-03-18-06-22-17.xlsx")
+#raw_data<-read_excel("input/2024_REACH_SOM_DSRA_-_all_versions_-_False_-_2024-03-18-06-22-17.xlsx")
 raw_kobo_data <- ImpactFunctions::get_kobo_data(asset_id = "amnDUBvDnga4UYnYU4g5kz", un = "abdirahmanaia")
 
 version_count <- n_distinct(data_in_processing$`__version__`)
@@ -23,7 +23,7 @@ if (version_count > 1) {
 raw_data<- raw_data %>%
   dplyr::rename(uuid =`_uuid`)
 
-###imprting hh_roster
+###imprting hh_roster -- need to figure out how to capture this from the export
 hh_roster<-read_excel("input/2024_REACH_SOM_DSRA_-_all_versions_-_False_-_2024-03-18-06-22-17.xlsx",sheet =2)
 
 ###renaming submission uuid
@@ -38,14 +38,14 @@ roster_count<-hh_roster %>%
 raw_data<-raw_data %>% left_join(roster_count,by="uuid")
 
 data_in_processing<-raw_data
-kobo_tool_name <- "tool/dsra_tool.xlsx"
+kobo_tool_name <- "02_input/DSRA_II_Tool.xlsx"
 
 # read in the survey questions / choices
 kobo_survey <- read_excel(kobo_tool_name, sheet = "survey")
 kobo_choice <- read_excel(kobo_tool_name, sheet = "choices")
 
 # read in the FO/district mapping
-fo_district_mapping <- read_excel("fo_file/fo_base_assignment_311223.xlsx") %>%
+fo_district_mapping <- read_excel("02_input/fo_base_assignment_DSRA_II.xlsx") %>%
   select(district = district_p_code, fo_in_charge) %>%
   mutate_all(tolower)
 
@@ -57,25 +57,16 @@ fo_district_mapping <- read_excel("fo_file/fo_base_assignment_311223.xlsx") %>%
 ####Calculate time
 uuid <- "uuid"
 mindur <- 25
+mindur_flag <- 30
 maxdur <- 60
+maxdur_flag <- 70
 
 # Survey time check function
-time_check <- function(df, time_min, time_max){
-  df <- df%>% mutate(interview_duration =difftime(as.POSIXct(ymd_hms(end)), as.POSIXct(ymd_hms(start)), units = "mins"),
-                     CHECK_interview_duration = case_when(
-                       interview_duration < time_min ~ "Too short",
-                       interview_duration > time_max ~ "Too long",
-                       TRUE ~ "Okay"
-                     )
-  )
-  return(df)
-}
 
-data_in_processing <- time_check(data_in_processing,mindur,maxdur)
-
+kobo_test_output <- get_kobo_metadata(dataset = data_in_processing, asset_id = "amnDUBvDnga4UYnYU4g5kz")
 
 data_in_processing <- data_in_processing %>%
-  mutate(time_check = case_when(
+  mutate(length_valid = case_when(
     interview_duration < mindur ~ "Too short",
     interview_duration > maxdur ~ "Too long",
     TRUE ~ "Okay"
@@ -181,8 +172,8 @@ output <- group_by_fo %>%
   check_duration(column_to_check ="interview_duration",
                                                              uuid_column ="uuid",
                                                              log_name ="duration_log",
-                                                             lower_bound = mindur,
-                                                             higher_bound = maxdur) %>%
+                                                             lower_bound = mindur_flag,
+                                                             higher_bound = maxdur_flag) %>%
   cleaningtools::check_logical_with_list(data_in_processing,
                                          uuid_column = "uuid",
                                          list_of_check = check_list,

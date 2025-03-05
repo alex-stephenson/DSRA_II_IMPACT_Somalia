@@ -54,7 +54,8 @@ my_clean_data <- create_clean_data(raw_dataset = raw_data,
                                    cleaning_log_new_value_column = "new_value",
                                    cleaning_log_change_type_column = "change_type")
 
-
+my_clean_data %>%
+  writexl::write_xlsx(., paste0('03_output/daily_cleaned_data/all_clean_data_', today(), '.xlsx'))
 
 ## soft duplicates
 
