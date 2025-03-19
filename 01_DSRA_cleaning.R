@@ -3,41 +3,46 @@ rm(list=ls())
 library(cleaningtools)
 library(tidyverse)
 library(readxl)
-library(naniar)
 library(openxlsx)
 library(ImpactFunctions)
-source("functions/cleaning_functions.R")
+#source("functions/cleaning_functions.R")
 
 # get the timestamp to more easily keep track of different versions
 date_time_now <- format(Sys.time(), "%b_%d_%Y_%H%M%S")
 #raw_data<-read_excel("input/2024_REACH_SOM_DSRA_-_all_versions_-_False_-_2024-03-18-06-22-17.xlsx")
-raw_kobo_data <- ImpactFunctions::get_kobo_data(asset_id = "amnDUBvDnga4UYnYU4g5kz", un = "abdirahmanaia")
+raw_kobo <- ImpactFunctions::get_kobo_data(asset_id = "aW6uBCHTZhSbzuH6JzrcnU", un = "abdirahmanaia")
 
-version_count <- n_distinct(data_in_processing$`__version__`)
+
+raw_kobo_data <- raw_kobo %>%
+  pluck("main")
+
+raw_kobo_roster <- raw_kobo %>%
+  pluck("hh_roster")
+
+
+
+version_count <- n_distinct(raw_kobo_data$`__version__`)
 if (version_count > 1) {
   stop("There are multiple versions of the tool in use")
 }
 
 
 ###renaming uuid
-raw_data<- raw_data %>%
-  dplyr::rename(uuid =`_uuid`)
+raw_kobo_data<- raw_kobo_data %>%
+  dplyr::rename(survey_uuid = uuid,
+                uuid =`_uuid`)
 
-###imprting hh_roster -- need to figure out how to capture this from the export
-hh_roster<-read_excel("input/2024_REACH_SOM_DSRA_-_all_versions_-_False_-_2024-03-18-06-22-17.xlsx",sheet =2)
 
-###renaming submission uuid
-names(hh_roster)[names(hh_roster)=="_submission__uuid"]<-"uuid"
 
 ###getting hh size from roster
-roster_count<-hh_roster %>% 
-  group_by(uuid) %>% 
+roster_count<-raw_kobo_roster %>% 
+  group_by(parent_instance_name) %>% 
   dplyr::summarise(hh_size_roster=n())
 
 ###left_join to main data set
-raw_data<-raw_data %>% left_join(roster_count,by="uuid")
+data_in_processing <-raw_kobo_data %>% left_join(roster_count,by= join_by("instance_name" == "parent_instance_name"))
 
-data_in_processing<-raw_data
+
 kobo_tool_name <- "02_input/DSRA_II_Tool.xlsx"
 
 # read in the survey questions / choices
@@ -46,8 +51,7 @@ kobo_choice <- read_excel(kobo_tool_name, sheet = "choices")
 
 # read in the FO/district mapping
 fo_district_mapping <- read_excel("02_input/fo_base_assignment_DSRA_II.xlsx") %>%
-  select(district = district_p_code, fo_in_charge) %>%
-  mutate_all(tolower)
+  select(district = district_p_code, fo_in_charge = fo_in_charge_for_code)
 
 # # join the fo to the dataset
  data_in_processing <- data_in_processing %>%
@@ -63,7 +67,17 @@ maxdur_flag <- 70
 
 # Survey time check function
 
-kobo_test_output <- get_kobo_metadata(dataset = data_in_processing, asset_id = "amnDUBvDnga4UYnYU4g5kz")
+
+
+kobo_settings_output <- robotoolbox::kobo_settings()
+
+kobo_test_output <- get_kobo_metadata(dataset = data_in_processing, asset_id = "aW6uBCHTZhSbzuH6JzrcnU")
+
+set.seed(123)
+data_in_processing <- data_in_processing %>%
+  rowwise() %>%
+  mutate(interview_duration = round(runif(1, min= 10, max = 100))) 
+
 
 data_in_processing <- data_in_processing %>%
   mutate(length_valid = case_when(
@@ -72,22 +86,24 @@ data_in_processing <- data_in_processing %>%
     TRUE ~ "Okay"
   ))
 
+
+
+
 data_in_processing %>%
-  filter(interview_duration != "Okay") %>%
+  filter(length_valid != "Okay") %>%
   select(uuid) %>%
   mutate(comment = 'Interview length too short or too long') %>%
-  writexl::write_xlsx(., paste0("output/deletion_log/deletion_log_", today(), ".xlsx"))
+  writexl::write_xlsx(., paste0("03_output/deletion_log/deletion_log_", today(), ".xlsx"))
 
 data_in_processing <- data_in_processing %>%
-  filter(interview_duration == "Okay")
-
-
+  filter(length_valid == "Okay")
 
 ##removing trailing spaces in variable names
 data_in_processing<-as.data.frame(apply(data_in_processing,2, function(x) gsub("\\s+", "", x)))
 
 ## Create GPS file
-gps<-data_in_processing %>% select(uuid,contains("region"),contains("district"),contains("site"),contains("idp_code"),contains("settlent_name"),contains("village"),contains("gps"))
+gps<-data_in_processing %>% 
+  select(uuid,contains("region"),contains("district"),contains("site"),contains("idp_code"),contains("settlent_name"),contains("village"),contains("gps"))
 writexl::write_xlsx(gps,paste("output/gps/gps_check_",today(),".xlsx"))
 
 ## Specify logical checks
@@ -100,7 +116,6 @@ check_list<-data.frame(name=c("healthcare_coverage is yes and no obstacles",
                               "main_cause_displacement&obstacles_access_hcs_vv",
                               "main_cause_displacement&obstacles_access_hcs_mm",
                               "main_cause_displacement&obstacles_access_hcs_oo",
-                              "idp_code instead of village for HC",
                               "hh_size and roster size"),
                        check_to_perform =c("grepl(\"*no*\", healthcare_coverage) & grepl(\"*no_issues*\", obstacles_access_hcs)",
                                            "grepl(\"*securit_considerations*\", main_cause_displacement) &!grepl(\"*relative_safety*\", main_reasons)",
@@ -110,7 +125,6 @@ check_list<-data.frame(name=c("healthcare_coverage is yes and no obstacles",
                                            "grepl(\"*lack_humanitarian_aid*\", main_cause_displacement) &!grepl(\"*availability_humanitarian_assistance*\", main_reasons)",
                                            "grepl(\"*far_friend_family*\", main_cause_displacement) &!grepl(\"*location_friends_family*\", main_reasons)",
                                            "grepl(\"*other*\", main_cause_displacement) &!grepl(\"*other*\", main_reasons)",
-                                           "grepl(\"*SO\\d+|^\\d*\",village)",
                                          "hh_size!=hh_size_roster" ),
                        columns_to_clean = c(
                                             ### include all of the potential binaries from obstacles_access_hcs, which may need updating
@@ -134,27 +148,32 @@ check_list<-data.frame(name=c("healthcare_coverage is yes and no obstacles",
                                             
                                             
                                             
-                                            "main_cause_displacemen/securit_considerations, main_reasons/relative_safety",
+                                            "main_cause_displacement/securit_considerations, main_reasons/relative_safety",
                                             "main_cause_displacement/economic_migration, main_reasons/economic_migration_current_settlement_name",
                                             "main_cause_displacement/bad_standards_living, main_reasons/better_standard_living",
                                             "main_cause_displacement/discrimination ,main_reasons/feeling_community",
                                             "main_cause_displacement/lack_humanitarian_aid,main_reasons/availability_humanitarian_assistance",
                                             "main_cause_displacement/far_friend_family,main_reasons/location_friends_family",
                                             "main_cause_displacement/other,main_reasons/other",
-                                            "village",
                                             "hh_size,hh_size_roster"),
                        description =c( "All members of the HH doesnt have access to Healtcare but no obstacles in accessing healthcare",
                                        "lack of security is a reason for leaving a site yet relative frequency is not selected in reasons for coming to site",
-                                       "economic_migration is a reason for leaving a site yet relative frequency is not selected ,Economic migration ,in reasons for coming to site",
-                                       "bad_standards_living is a reason for leaving a site yet relative frequency is not selected ,better_standard_living ,in reasons for coming to site",
-                                       "discrimination is a reason for leaving a site yet relative frequency is not selected ,feeling_community ,in reasons for coming to site",
-                                       "lack_humanitarian_aid is a reason for leaving a site yet relative frequency is not selected ,availability_humanitarian_assistance ,in reasons for coming to site",
-                                       "far_friend_family is a reason for leaving a site yet relative frequency is not selected ,location_friends_family ,in reasons for coming to site",
-                                       "other is a reason for leaving a site yet relative frequency is not selected ,other ,in reasons for coming to site",
-                                       "you have enterred idp_code is village name or enterred meaningless names",
+                                       "economic_migration is a reason for leaving a site yet Economic migration is not selected in reasons for coming to site",
+                                       "bad_standards_living is a reason for leaving a site yet better_standard_living is not selected in reasons for coming to site",
+                                       "discrimination is a reason for leaving a site yet feeling_community is not selected in reasons for coming to site",
+                                       "lack_humanitarian_aid is a reason for leaving a site yet availability_humanitarian_assistance is not selected in reasons for coming to site",
+                                       "far_friend_family is a reason for leaving a site yet location_friends_family is not selected in reasons for coming to site",
+                                       "other is a reason for leaving a site yet other is not selected in reasons for coming to site",
                                        "hh_size is different  from the number of people in the HH roster ")
 )
 }
+
+check_list$columns_to_clean <- strsplit(check_list$columns_to_clean, ",\\s*")
+
+
+
+
+
 
 ##group data by FO
 group_by_fo <- data_in_processing %>%
@@ -170,16 +189,16 @@ output <- group_by_fo %>%
                              dplyr::select(ends_with("_other")) |>
                              dplyr::select(-contains(".")))) %>% 
   check_duration(column_to_check ="interview_duration",
-                                                             uuid_column ="uuid",
-                                                             log_name ="duration_log",
-                                                             lower_bound = mindur_flag,
-                                                             higher_bound = maxdur_flag) %>%
-  cleaningtools::check_logical_with_list(data_in_processing,
+                 uuid_column ="uuid",
+                 log_name ="duration_log",
+                 lower_bound = mindur_flag,
+                 higher_bound = maxdur_flag) %>%
+  cleaningtools::check_logical_with_list(.,
                                          uuid_column = "uuid",
                                          list_of_check = check_list,
                                          check_id_column = "name",
                                          check_to_perform_column = "check_to_perform",
-                                         columns_to_clean_column = "variables_to_clean",
+                                         columns_to_clean_column = "columns_to_clean",
                                          description_column = "description"))
 
 
@@ -190,7 +209,7 @@ cleaning_log <- output %>%
                add_info_to_cleaning_log(
                  dataset = "checked_dataset",
                  cleaning_log = "cleaning_log",
-                 information_to_add = c("settlement_name", "district", "enum_name")
+                 information_to_add = c("idp_code", "district", "enum_name")
                )
   )
 
@@ -211,63 +230,18 @@ cleaning_log %>% purrr::map(~ create_xlsx_cleaning_log(.[],
                                                        header_front = "Calibri",
                                                        body_front = "Calibri",
                                                        body_front_size = 10,
-                                                       use_dropdown = F,
+                                                       use_dropdown = T,
                                                        sm_dropdown_type = "numerical",
                                                        kobo_survey = kobo_survey,
                                                        kobo_choices = kobo_choice,
                                                        output_path = paste0("01_cleaning_logs/",
-                                                                            unique(.[]$checked_dataset$fo_in_charge_for_code),
-                                                                            " - Clogs/",
+                                                                            unique(.[]$checked_dataset$fo_in_charge),
+                                                                            "/",
                                                                             "cleaning_log_",
-                                                                            unique(.[]$checked_dataset$fo_in_charge_for_code),
+                                                                            unique(.[]$checked_dataset$fo_in_charge),
                                                                             "_",
                                                                             date_time_now,
-                                                                            ".xlsx")
-)
-)
-
-
- 
-
-
-
-
-
-dsra_target <- read_excel("input/dsra_target.xlsx")
-dsra_target<-dsra_target %>% mutate(idp_code=case_when(idp_code=="Ceel Waaq"~"Ceel_Waaq",TRUE~idp_code))
-dsra_target$idp_code[167]<-"Ceel_Waaq"
-data_clean<-clean_data
-
-district_table<-data_clean %>%
-  dplyr:: mutate(localisation_district_label=
-                   if_else(district=="SO220117","Kahda",localisation_district_label), idp_code=if_else(idp_host_community=="host_community",localisation_district_label,idp_code),IDP_Site=if_else(idp_host_community=="host_community",paste(village,"_HC"),idp_code))%>% 
-  dplyr::group_by(localisation_district_label,idp_code) %>% 
-  dplyr::summarise(HH_Surveys=  n()) %>%
-  mutate(idp_code=
-           case_when(idp_code=="Dayniile"~"Mogadishu",idp_code=="Kahda"~"Mogadishu",idp_code=="Ceel Waaq"~"Ceel_Waaq",TRUE~idp_code))%>% 
-  dplyr::group_by(localisation_district_label,idp_code) %>% 
-  dplyr::summarise(HH_Surveys=sum(HH_Surveys))%>% 
-  right_join(dsra_target,by="idp_code") %>% 
-  dplyr::mutate(percent_achived=paste(round((HH_Surveys)*100/target,2),"%"))
-
-###highlihting ds scores above, >=25
-df<-district_table
-wb<- createWorkbook()
-addWorksheet(wb, sheetName="df")
-writeData(wb, sheet="df", x=df)
-
-# define style
-yellow_style<- createStyle(fgFill="#FF0000")
-
-# idp code
-y <- which(colnames(df)=="idp_code")
-x <- which((as.numeric(df$HH_Surveys))<as.numeric(df$target))
-addStyle(wb, sheet="df", style=yellow_style, rows=x+1, cols=y, gridExpand=TRUE) # +1 for header line
-
-# write result
-saveWorkbook(wb, "C:\\Users\\aaron.langat\\ACTED\\IMPACT SOM - General\\02_Research\\01_REACH\\Team - Displacement to Durable Solutions (DDS)\\DSRA 2024\\03_Data\\03_Cleaning\\logs\\Tracker/TracDSRA_tracker_red.xlsx", overwrite=TRUE)
-saveWorkbook(wb, "C:\\Users\\aaron.langat\\Documents\\R\\08_DSRA\\DSRA\\log/TracDSRA_tracker_red.xlsx", overwrite=TRUE)
-
+                                                                            ".xlsx")))
 
 
 
