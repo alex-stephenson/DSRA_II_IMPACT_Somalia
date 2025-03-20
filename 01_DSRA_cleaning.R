@@ -20,6 +20,7 @@ raw_kobo_roster <- raw_kobo %>%
   pluck("hh_roster")
 
 
+site_data <- read_csv("04_tool/239_site_lookup.csv")
 
 version_count <- n_distinct(raw_kobo_data$`__version__`)
 if (version_count > 1) {
@@ -30,7 +31,12 @@ if (version_count > 1) {
 ###renaming uuid
 raw_kobo_data<- raw_kobo_data %>%
   dplyr::rename(survey_uuid = uuid,
-                uuid =`_uuid`)
+                uuid =`_uuid`) %>%
+  mutate(idp_hc_code = ifelse(is.na(idp_code), village, idp_code)) %>%
+  left_join(site_data, by = "idp_code") %>%
+  relocate(site_name, .after = idp_code) %>%
+  relocate(idp_hc_code, .before = idp_code) %>% 
+  mutate(site_name = ifelse(is.na(site_name), village, site_name))
 
 
 
@@ -103,7 +109,7 @@ data_in_processing<-as.data.frame(apply(data_in_processing,2, function(x) gsub("
 
 ## Create GPS file
 gps<-data_in_processing %>% 
-  select(uuid,contains("region"),contains("district"),contains("site"),contains("idp_code"),contains("settlent_name"),contains("village"),contains("gps"))
+  select(uuid,contains("region"),contains("district"),contains("site"),contains("idp_code"),contains("village"),contains("gps"))
 writexl::write_xlsx(gps,paste("output/gps/gps_check_",today(),".xlsx"))
 
 ## Specify logical checks
@@ -157,7 +163,7 @@ check_list<-data.frame(name=c("healthcare_coverage is yes and no obstacles",
                                             "main_cause_displacement/other,main_reasons/other",
                                             "hh_size,hh_size_roster"),
                        description =c( "All members of the HH doesnt have access to Healtcare but no obstacles in accessing healthcare",
-                                       "lack of security is a reason for leaving a site yet relative frequency is not selected in reasons for coming to site",
+                                       "lack of security is a reason for leaving a site yet relative safety is not selected in reasons for coming to site",
                                        "economic_migration is a reason for leaving a site yet Economic migration is not selected in reasons for coming to site",
                                        "bad_standards_living is a reason for leaving a site yet better_standard_living is not selected in reasons for coming to site",
                                        "discrimination is a reason for leaving a site yet feeling_community is not selected in reasons for coming to site",
@@ -209,7 +215,7 @@ cleaning_log <- output %>%
                add_info_to_cleaning_log(
                  dataset = "checked_dataset",
                  cleaning_log = "cleaning_log",
-                 information_to_add = c("idp_code", "district", "enum_name")
+                 information_to_add = c("idp_hc_code", "site_name", "localisation_region_label", "localisation_district_label", "enum_name", "fo_in_charge")
                )
   )
 

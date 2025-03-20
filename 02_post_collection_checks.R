@@ -1,3 +1,4 @@
+rm(list = ls())
 ### post collection checks
 
 ## read in all the data
@@ -5,15 +6,28 @@ library(tidyverse)
 library(readxl)
 
 ## raw data
-raw_kobo_data <- ImpactFunctions::get_kobo_data(asset_id = "amnDUBvDnga4UYnYU4g5kz", un = "abdirahmanaia")
+raw_data <- ImpactFunctions::get_kobo_data(asset_id = "aW6uBCHTZhSbzuH6JzrcnU", un = "abdirahmanaia") 
+raw_kobo_data <- raw_data %>%
+  pluck("main") %>%
+  dplyr::rename(survey_uuid = uuid,
+                uuid =`_uuid`)
 
 
-## all clogs
-dir_path <- "C:/Users/alex.stephenson/ACTED/IMPACT SOM - 01_REACH/2024_25/01_ISU/SOM1901_HSM/03_Data & Data Analysis/DEC_24/01CLeaning scripts/04_data_cleaning"
 
-# List all .xlsx files that contain 'cleaning_log' in the name
-file_list <- list.files(dir_path, pattern = "cleaning_log.*\\.xlsx$", recursive = TRUE, full.names = TRUE) %>%
-  keep(~ !str_detect(.x, "report"))  # Exclude files with 'report' in the name
+# Define directory pattern
+dir_path <- "01_cleaning_logs"
+
+
+all_files <- list.files(
+  path = dir_path,
+  recursive = TRUE,
+  full.names = TRUE
+)
+
+file_list <- all_files %>%
+  keep(~ str_detect(.x, "/[^/]+_complete/") & str_detect(.x, "cleaning_log.*\\.xlsx$") & !str_detect(.x, "report"))
+
+
 
 # Function to read and convert all columns to character
 read_and_clean <- function(file, sheet) {
@@ -24,6 +38,8 @@ read_and_clean <- function(file, sheet) {
 # Read and combine all files into a single dataframe
 cleaning_logs <- map_dfr(file_list, sheet = 'cleaning_log', read_and_clean)
 
+cleaning_logs <- cleaning_logs %>%
+  filter(!is.na(change_type))
 
 # now read in the deletion log
 
@@ -34,25 +50,27 @@ dlogs_path <- r"(03_output\deletion_log)"
 dlog_list <- list.files(dlogs_path, pattern = "deletion_log.*\\.xlsx$", recursive = TRUE, full.names = TRUE)
 
 all_dlogs <- dlog_list %>%
-  map_dfr(read_excel) %>%
+  map_dfr(., sheet = 'Sheet1', read_and_clean) %>%
   pull(uuid)
-
-## now remove dlog
-
-raw_data <- raw_kobo_data %>%
-  filter(! uuid %in% all_dlogs)
 
 
 ## now apply the clog and the clog using cleaningtools code
 
-
-my_clean_data <- create_clean_data(raw_dataset = raw_data,
+my_clean_data <- create_clean_data(raw_dataset = raw_kobo_data,
                                    raw_data_uuid_column = "uuid",
                                    cleaning_log = cleaning_logs, 
                                    cleaning_log_uuid_column = "uuid",
                                    cleaning_log_question_column = "question",
                                    cleaning_log_new_value_column = "new_value",
                                    cleaning_log_change_type_column = "change_type")
+
+
+
+
+## now remove dlog
+
+my_clean_data <- my_clean_data %>%
+  filter(! uuid %in% all_dlogs)
 
 my_clean_data %>%
   writexl::write_xlsx(., paste0('03_output/daily_cleaned_data/all_clean_data_', today(), '.xlsx'))
@@ -116,7 +134,16 @@ saveWorkbook(wb, similar_survey_export_path, overwrite = TRUE)
 
 ## step 1 - read in data containing the sample size for each CA / settlement
 
-## step 2 - calculate the number of interviews per CA / settlement, based on the existing data
+sampling_df <- readxl::read_excel('02_input/DSRA_II_Sampling_Info.xlsx') %>%
+  select(idp_code, sample_size, group)
+
+## step 2 - calculate the number of interviews per settlement or HC, based on the existing data
+
+idp_count <- my_clean_data %>%
+  count(idp_code) %>%
+  left_join(sampling_df) %>%
+  mutate(oversampled = ifelse(n > sample_size, TRUE, FALSE))
+
 
 ## step 3 - calculate which sites are oversampled
 
@@ -125,9 +152,9 @@ saveWorkbook(wb, similar_survey_export_path, overwrite = TRUE)
 ## output for assessment input and they will make into deletion log
 
 
+
+
 ## outliers - not sure if this is necessary as there's just one integer question anyway - HH size
-
-
 # we should exclude all questions from outlier checks that aren't integer response types (integer is the only numerical response type)
 outlier_excluded_questions <- kobo_survey %>%
   filter(type != 'integer') %>%
