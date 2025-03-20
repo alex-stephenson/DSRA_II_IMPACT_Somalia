@@ -16,10 +16,21 @@ library(openxlsx)
 
 
 ### read in relevant data
+site_data <- read_csv("04_tool/239_site_lookup.csv")
 
 
 ### raw data
-raw_kobo_data <- ImpactFunctions::get_kobo_data(asset_id = "amnDUBvDnga4UYnYU4g5kz", un = "abdirahmanaia")
+raw_data <- ImpactFunctions::get_kobo_data(asset_id = "aW6uBCHTZhSbzuH6JzrcnU", un = "abdirahmanaia")
+
+raw_kobo_data <-  raw_data %>%
+  pluck("main") %>%
+  dplyr::rename(survey_uuid = uuid,
+                uuid =`_uuid`) %>%
+  mutate(idp_hc_code = ifelse(is.na(idp_code), village, idp_code)) %>%
+  left_join(site_data, by = "idp_code") %>%
+  relocate(site_name, .after = idp_code) %>%
+  relocate(idp_hc_code, .before = idp_code) %>% 
+  mutate(site_name = ifelse(is.na(site_name), village, site_name))
 
 
 ### clean data
@@ -28,93 +39,69 @@ latest_file <- rownames(clean_data_list)[which.max(clean_data_list$mtime)]
 clean_data <- readxl::read_excel(latest_file)
 
 ### deletion log
+dlogs_path <- r"(03_output\deletion_log)"
+
 dlog_list <- list.files(dlogs_path, pattern = "deletion_log.*\\.xlsx$", recursive = TRUE, full.names = TRUE)
 
 all_dlogs <- dlog_list %>%
   map_dfr(read_excel)
 
 ### Sampling data
+## over sampling
 
+sampling_df_idp <- readxl::read_excel('02_input/DSRA_II_Sampling_Info.xlsx', sheet = "IDP") %>%
+  select(idp_code, site_name, district_name = District, district = district_code, sample_size, group)
+
+sampling_df_hc <- readxl::read_excel('02_input/DSRA_II_Sampling_Info.xlsx', sheet = "HC") %>%
+  janitor::clean_names() %>%
+  select(idp_code = city_town_name, district_name, district, sample_size = sample) %>%
+  mutate(group = NA,
+         site_name = idp_code)
+
+sampling_df <- rbind(sampling_df_idp,sampling_df_hc ) 
+
+
+idp_count <- clean_data %>%
+  count(idp_code, district) %>%
+  left_join(sampling_df_idp, by = c("idp_code", "district")) %>%
+  mutate(oversampled = ifelse(n > sample_size, TRUE, FALSE))
 
 ### FO Data
-fo_district_mapping <- read_excel("inputs/fo_base_assignment_DSRA_II.xlsx") %>%
-  select(district, "district_code" = district_p_code, "fo" = fo_in_charge_for_code) %>%
-  mutate_all(tolower)
+fo_district_mapping <- read_excel("02_input/fo_base_assignment_DSRA_II.xlsx") %>%
+  select(district_name = district, "district" = district_p_code, "fo" = fo_in_charge_for_code) 
 
 
+### enumerator performance
 
-dashboard_data_path = r"(outputs/dashboard/)"
 
-dashboard_data_files_names <- list.files(path = dashboard_data_path,
-                                         pattern = "*unchecked_data_for_dashboard_*", 
-                                         recursive = FALSE)
-
-dashboard_data <- dashboard_data_files_names %>%
-  map_dfr(~read_excel(paste0(dashboard_data_path,.x))) %>%
-  dplyr::rename("FO" = fo_in_charge_for_code,
-                "District" = district,
-                "Settlement" = settlement,
-                "Enum Phone" = enum_code,
-                "Interview Type" = ki_interview
-  ) %>%
-  mutate_all(tolower)
+dashboard_data <- clean_data %>%
+  ## add in FO
+    left_join(fo_district_mapping) %>%
+  ##
+  dplyr::rename("Enum Phone" = enum_name) 
 
 dashboard_data_all <- dashboard_data
 
-dashboard_data <- dashboard_data %>%
-  filter(length_valid== "okay")
 
+### Site level Completion
 
-## remove data that is oversampled
-
-dashboard_data <- dashboard_data %>%
-  filter(str_detect(Settlement, "so")) %>%
-  group_by(Settlement) %>%
-  dplyr::slice_head(n = 1) %>%
+sites_done <- dashboard_data %>% 
+  group_by(fo, idp_code) %>%
+  dplyr::summarise(surveys_done = n()) %>%
   ungroup()
 
-fo_district_mapping <- read_excel("inputs/fo_base_assignment_1224.xlsx") %>%
-  select(district, "district_code" = district_for_code, "fo" = fo_in_charge_for_code) %>%
-  mutate_all(tolower)
-
-### OPZ Completion
-
-KIIs_Done <- dashboard_data %>% 
-  group_by(FO, operational_zone) %>%
-  dplyr::summarise(surveys_done = n()) %>%
-  ungroup() %>%
-  select(-(FO)) %>%
-  mutate(operational_zone = str_replace_all(operational_zone, "_", " "))
-
-districts <- fo_district_mapping %>%
-  select(district) %>%
-  distinct(district) %>%
-  pull(district) 
+KIIs_Done <- sampling_df %>% 
+  left_join(sites_done %>% select(idp_code, surveys_done)) %>%
+  left_join((fo_district_mapping %>% select(-district_name)), by = join_by("district")) %>%
+  filter(group == "Core 189" | (group == "Buffer 50" & surveys_done > 0)) %>%
+  mutate(surveys_done = replace_na(surveys_done, 0)) %>%
+  rename(total_surveys = sample_size)
+  
 
 
-OPZs <- readxl::read_excel("inputs/Very Heavy Restriction Settlements 6_REF.xlsx", sheet = "Correct") %>%
-  mutate_all(tolower) %>% 
-  filter(District %in% districts) %>%
-  select(-Region) %>%
-  dplyr::rename("Region" = "admin1Name")
+## Completion by FO
 
-# Summarize the OPZs data by Region, District, and OPZ
-OPZ_grpd <- OPZs %>%
-  group_by(Region, District, OPZ) %>%
-  dplyr::summarise(total_surveys = n(), .groups = "drop") %>%
-  left_join(
-    fo_district_mapping,
-    by = c("District" = "district"))
-
-OPZ_Completion <- OPZ_grpd %>%
-  left_join(KIIs_Done, by = join_by("OPZ" == "operational_zone")) %>% 
-  mutate(surveys_done = ifelse(is.na(surveys_done), 0, surveys_done),
-         "% Complete" = round((surveys_done / total_surveys) * 100, 1)) %>%
-  select(-Region, -district_code) %>%
-  select(fo, District, OPZ, total_surveys, surveys_done, `% Complete`)
-
-
-completion_by_FO <- OPZ_Completion %>%
+completion_by_FO <- KIIs_Done %>%
   group_by(fo) %>%
   summarise(total_surveys = sum(total_surveys),
             total_done = sum(surveys_done)) %>%
@@ -122,8 +109,8 @@ completion_by_FO <- OPZ_Completion %>%
 
 ### OPZ burndown
 # Parameters for the ideal burndown chart
-total_tasks <- 1805
-days <- 13
+total_tasks <- 11710
+days <- 19
 
 # Ideal burndown data (linear decrease)
 ideal_burndown <- data.frame(
@@ -134,7 +121,6 @@ ideal_burndown <- data.frame(
 
 # Prepare the actual burndown data
 actual_burndown <- dashboard_data %>%
-  filter(date(`_submission_time`) >= "2024-12-18") %>%  # Filter relevant dates
   mutate(today = as.Date(today),
          Day = as.integer(today - min(today)) + 1) %>%  # Calculate day number s
   group_by(Day) %>%  # Group by FO, Region, and District
@@ -199,10 +185,10 @@ enum_performance <- dashboard_data_all %>%
 
 
 mean_per_day <- dashboard_data_all %>%
-  group_by(FO, `Enum Phone`, today) %>%
+  group_by(fo, `Enum Phone`, today) %>%
   summarise(n = n()) %>%
   ungroup() %>%
-  group_by(FO, `Enum Phone`) %>%
+  group_by(fo, `Enum Phone`) %>%
   summarise("Average per day" = mean(n))
 
 enum_performance <- enum_performance %>%
@@ -212,16 +198,12 @@ enum_performance <- enum_performance %>%
 
 ### check number of surveys per settlement:
 
-sites_and_surveys <- OPZs %>%
+sites_and_surveys <- idp_count %>%
+  left_join(sampling_df) %>%
   left_join(
     fo_district_mapping,
     by = c("District" = "district")) %>%
-  select(District, name, Settlement = Pcode, FO = fo, operational_zone = OPZ) %>%
-  mutate(Settlement = str_replace_all(Settlement, " ", "_"),
-         operational_zone = str_replace_all(operational_zone, " ", "_")) %>%
-  left_join((dashboard_data %>%
-               group_by(FO, operational_zone, Settlement) %>%
-               summarise(number_surveys = n()))) 
+  select(District, Settlement = idp_code, `Sample Size`= sample_size, `Surveys Complete` = n, FO = fo)
 
 
 sites_and_surveys %>%
