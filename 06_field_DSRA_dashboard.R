@@ -36,7 +36,14 @@ raw_kobo_data <-  raw_data %>%
 ### clean data
 clean_data_list <- file.info(list.files("03_output/daily_cleaned_data/", full.names = T))
 latest_file <- rownames(clean_data_list)[which.max(clean_data_list$mtime)]
-clean_data <- readxl::read_excel(latest_file)
+clean_data_raw <- readxl::read_excel(latest_file)
+
+clean_data <- clean_data_raw %>% 
+  mutate(idp_hc_code = ifelse(is.na(idp_code), village, idp_code)) %>%
+  left_join(site_data, by = "idp_code") %>%
+  relocate(site_name, .after = idp_code) %>%
+  relocate(idp_hc_code, .before = idp_code) %>% 
+  mutate(site_name = ifelse(is.na(site_name), village, site_name))
 
 ### deletion log
 dlogs_path <- r"(03_output\deletion_log)"
@@ -50,20 +57,20 @@ all_dlogs <- dlog_list %>%
 ## over sampling
 
 sampling_df_idp <- readxl::read_excel('02_input/DSRA_II_Sampling_Info.xlsx', sheet = "IDP") %>%
-  select(idp_code, site_name, district_name = District, district = district_code, sample_size, group)
+  select(idp_hc_code = idp_code, site_name, district_name = District, district = district_code, sample_size, group)
 
 sampling_df_hc <- readxl::read_excel('02_input/DSRA_II_Sampling_Info.xlsx', sheet = "HC") %>%
   janitor::clean_names() %>%
-  select(idp_code = city_town_name, district_name, district, sample_size = sample) %>%
-  mutate(group = NA,
-         site_name = idp_code)
+  select(idp_hc_code = city_town_name, district_name, district, sample_size = sample) %>%
+  mutate(group = "Host Community",
+         site_name = idp_hc_code)
 
-sampling_df <- rbind(sampling_df_idp,sampling_df_hc ) 
+sampling_df <- rbind(sampling_df_idp,sampling_df_hc) 
 
 
 idp_count <- clean_data %>%
-  count(idp_code, district) %>%
-  left_join(sampling_df_idp, by = c("idp_code", "district")) %>%
+  count(idp_hc_code, district) %>%
+  left_join(sampling_df, by = c("idp_hc_code", "district")) %>%
   mutate(oversampled = ifelse(n > sample_size, TRUE, FALSE))
 
 ### FO Data
@@ -71,14 +78,13 @@ fo_district_mapping <- read_excel("02_input/fo_base_assignment_DSRA_II.xlsx") %>
   select(district_name = district, "district" = district_p_code, "fo" = fo_in_charge_for_code) 
 
 
-### enumerator performance
-
-
 dashboard_data <- clean_data %>%
+  select(-idp_code) %>%
+  rename(idp_code = idp_hc_code) %>%
   ## add in FO
     left_join(fo_district_mapping) %>%
   ##
-  dplyr::rename("Enum Phone" = enum_name) 
+  dplyr::rename("enum_phone" = enum_name) 
 
 dashboard_data_all <- dashboard_data
 
@@ -91,13 +97,16 @@ sites_done <- dashboard_data %>%
   ungroup()
 
 KIIs_Done <- sampling_df %>% 
+  rename(idp_code = idp_hc_code) %>%
   left_join(sites_done %>% select(idp_code, surveys_done)) %>%
   left_join((fo_district_mapping %>% select(-district_name)), by = join_by("district")) %>%
-  filter(group == "Core 189" | (group == "Buffer 50" & surveys_done > 0)) %>%
+  filter(group == "Core 189" | (group == "Buffer 50" & surveys_done > 0) | (group == "Host Community")) %>%
   mutate(surveys_done = replace_na(surveys_done, 0)) %>%
-  rename(total_surveys = sample_size)
-  
+  rename(total_surveys = sample_size) %>%
+  select(fo, idp_code, site_name, district_name, surveys_done, total_surveys)
 
+KIIs_Done %>%
+  writexl::write_xlsx(., "03_output/completion_report/completion_report.xlsx")
 
 ## Completion by FO
 
@@ -164,50 +173,37 @@ burndown <- ggplot() +
 
 ### enumerator performance
 
+deleted_data <- all_dlogs %>%
+  left_join((raw_kobo_data %>% select(uuid, enum_phone = enum_name))) %>%
+  count(enum_phone, name = "deleted") %>%
+  mutate(enum_phone = as.character(enum_phone))
 
-enum_performance <- dashboard_data_all %>%
-  count(FO, `Enum Phone`, length_valid) %>%
-  mutate(length_valid = 
-           case_when(
-             length_valid == 'too short' ~ 'deleted',
-             length_valid == 'too long' ~ 'deleted',
-             TRUE ~ length_valid
-           )) %>%
-  group_by(FO, `Enum Phone`, length_valid) %>%
-  summarise(n = sum(n)) %>%
-  ungroup() %>%
-  tidyr::pivot_wider(names_from = length_valid, values_from = n, values_fill = 0) %>%
-  mutate(
-    Total = deleted + okay,
-    "Percent Accepted" = (okay / (deleted + okay)) * 100
-  ) %>%
-  select(-deleted, -okay)
+valid_data <- dashboard_data_all %>%
+  count(enum_phone, name = "valid") %>%
+  mutate(enum_phone = as.character(enum_phone))
 
+
+enum_performance <- deleted_data %>%
+  full_join(valid_data) %>%
+  mutate(valid = replace_na(valid, 0),
+         deleted = replace_na(deleted, 0),
+         total = deleted + valid, 
+         pct_valid = (valid / (deleted + valid)) * 100) 
 
 mean_per_day <- dashboard_data_all %>%
-  group_by(fo, `Enum Phone`, today) %>%
+  group_by(fo, enum_phone, today, district = localisation_district_label) %>%
   summarise(n = n()) %>%
   ungroup() %>%
-  group_by(fo, `Enum Phone`) %>%
-  summarise("Average per day" = mean(n))
+  group_by(fo, enum_phone, district) %>%
+  summarise("Average per day" = mean(n)) %>%
+  mutate(enum_phone = as.character(enum_phone))
 
 enum_performance <- enum_performance %>%
-  left_join(mean_per_day)
+  left_join(mean_per_day) %>%
+  select(fo, enum_phone, district, valid, deleted, total, pct_valid)
 
 
 
-### check number of surveys per settlement:
-
-sites_and_surveys <- idp_count %>%
-  left_join(sampling_df) %>%
-  left_join(
-    fo_district_mapping,
-    by = c("District" = "district")) %>%
-  select(District, Settlement = idp_code, `Sample Size`= sample_size, `Surveys Complete` = n, FO = fo)
-
-
-sites_and_surveys %>%
-  writexl::write_xlsx(., "outputs/sites_and_surveys_names_district.xlsx")
 ####### Shiny Dashboard
 
 
@@ -217,7 +213,7 @@ sites_and_surveys %>%
 {
 # UI
 ui <- dashboardPage(
-  dashboardHeader(title = "HSM Dec 24 Dashboard"),
+  dashboardHeader(title = "DSRA II April 2025 Dashboard"),
   dashboardSidebar(
     collapsed = TRUE,
     sidebarMenu(
@@ -227,7 +223,7 @@ ui <- dashboardPage(
     tabItems(
       tabItem(tabName = "dashboard",
               fluidRow(
-                box(title = "OPZ Completion", status = "primary", solidHeader = TRUE, width = 6,
+                box(title = "Site Completion", status = "primary", solidHeader = TRUE, width = 6,
                     reactableOutput("reactable_OPZ"),
                     downloadButton("download_OPZ", "Export as Excel")
                 ),
@@ -257,16 +253,16 @@ server <- function(input, output, session) {
   
   # Reactable for OPZ Completion
   output$reactable_OPZ <- renderReactable({
-    reactable(OPZ_Completion, searchable = TRUE, bordered = TRUE)
+    reactable(KIIs_Done, searchable = TRUE, bordered = TRUE)
   })
   
   # Download for OPZ Completion
   output$download_OPZ <- downloadHandler(
     filename = function() {
-      paste("OPZ_Completion_", Sys.Date(), ".xlsx", sep = "")
+      paste("Survey_District_Done", Sys.Date(), ".xlsx", sep = "")
     },
     content = function(file) {
-      write.xlsx(OPZ_Completion, file)
+      write.xlsx(KIIs_Done, file)
     }
   )
   
