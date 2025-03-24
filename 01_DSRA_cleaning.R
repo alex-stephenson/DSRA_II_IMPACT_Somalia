@@ -66,14 +66,12 @@ fo_district_mapping <- read_excel("02_input/fo_base_assignment_DSRA_II.xlsx") %>
 # set the minimum and maximum "reasonable" survey times. Anything outside of this will be flagged
 ####Calculate time
 uuid <- "uuid"
-mindur <- 25
-mindur_flag <- 30
+mindur <- 15
+mindur_flag <- 20
 maxdur <- 60
 maxdur_flag <- 70
 
 # Survey time check function
-
-
 
 kobo_settings_output <- robotoolbox::kobo_settings()
 
@@ -93,6 +91,15 @@ data_in_processing <- data_in_processing %>%
   ))
 
 
+## produce an output for tracking how many surveys are being deleted
+data_in_processing %>%
+  count(fo_in_charge, length_valid) %>%
+  pivot_wider(names_from = length_valid, values_from = n) %>%
+  mutate(Okay = replace_na(Okay, 0),
+         `Too long` = replace_na(`Too long`, 0),
+         `Too short` = replace_na(`Too short`, 0),
+         total = Okay + `Too long` + `Too short`) %>%
+  writexl::write_xlsx(., paste0('03_output/time_checks/time_check.xlsx'))
 
 
 data_in_processing %>%
@@ -109,10 +116,42 @@ data_in_processing<-as.data.frame(apply(data_in_processing,2, function(x) gsub("
 
 ## Create GPS file
 gps<-data_in_processing %>% 
-  select(uuid,contains("region"),contains("district"),contains("site"),contains("idp_code"),contains("village"),contains("gps"))
+  select(uuid,contains("region"),contains("district"),contains("idp_hc"),contains("gps"))
 writexl::write_xlsx(gps,paste("output/gps/gps_check_",today(),".xlsx"))
 
 ## Specify logical checks
+
+## start by adding variables to see if the edu score given in the roster is bigger than the highest edu question
+
+data_in_processing <- data_in_processing %>%
+  mutate(highest_edu_numeric = case_when(
+    highest_hh_education_level == "preschool_(kindergarten)" ~ 0,
+    highest_hh_education_level == "primary_education_Level_I" ~ 1,
+    highest_hh_education_level == "secondary_completed_Level_II" ~ 3,
+    highest_hh_education_level == "secondary_completed_Level_III" ~ 3,
+    highest_hh_education_level == "technical_vocational_qualification" ~ 3,
+    highest_hh_education_level == "undergraduate_completed" ~ 4,
+    highest_hh_education_level == "post-graduate_completed" ~ 5,
+    highest_hh_education_level == "phD" ~ 6,
+    TRUE ~ 0)) 
+
+
+roster_school_data <- raw_kobo_roster %>% 
+  mutate(school_attend_numeric = case_when(
+    school_attend == "yes_ttendingprimar_school" ~ 1,
+    school_attend == "yes_attendingsecondary_school" ~ 3,
+    school_attend == "yes_attending_professional_training" ~ 3,
+    TRUE ~ 0
+  )) %>%
+  group_by(parent_instance_name) %>%
+  slice_max(school_attend_numeric, n = 1, with_ties = FALSE) %>%
+  select(instance_name = parent_instance_name, roster_max_school_attend = school_attend, roster_max_school_attend_numeric = school_attend_numeric)
+
+data_in_processing <- data_in_processing %>%
+  left_join(roster_school_data) %>% 
+  mutate(edu_roster_flag = ifelse(roster_max_school_attend_numeric > highest_edu_numeric, TRUE, FALSE))
+
+
 {
 check_list<-data.frame(name=c("healthcare_coverage is yes and no obstacles",
                               "securit_considerations in main_cause_displacement and no  relative_safety in main_reasons ",
@@ -122,7 +161,8 @@ check_list<-data.frame(name=c("healthcare_coverage is yes and no obstacles",
                               "main_cause_displacement&obstacles_access_hcs_vv",
                               "main_cause_displacement&obstacles_access_hcs_mm",
                               "main_cause_displacement&obstacles_access_hcs_oo",
-                              "hh_size and roster size"),
+                              "hh_size and roster size",
+                              "HH_roster_edu_vs_highest_edu_level"),
                        check_to_perform =c("grepl(\"*no*\", healthcare_coverage) & grepl(\"*no_issues*\", obstacles_access_hcs)",
                                            "grepl(\"*securit_considerations*\", main_cause_displacement) &!grepl(\"*relative_safety*\", main_reasons)",
                                            "grepl(\"*economic_migration*\", main_cause_displacement) &!grepl(\"*economic_migration_current_settlement_name*\", main_reasons)",
@@ -131,7 +171,8 @@ check_list<-data.frame(name=c("healthcare_coverage is yes and no obstacles",
                                            "grepl(\"*lack_humanitarian_aid*\", main_cause_displacement) &!grepl(\"*availability_humanitarian_assistance*\", main_reasons)",
                                            "grepl(\"*far_friend_family*\", main_cause_displacement) &!grepl(\"*location_friends_family*\", main_reasons)",
                                            "grepl(\"*other*\", main_cause_displacement) &!grepl(\"*other*\", main_reasons)",
-                                         "hh_size!=hh_size_roster" ),
+                                         "hh_size!=hh_size_roster",
+                                         "edu_roster_flag == TRUE"),
                        columns_to_clean = c(
                                             ### include all of the potential binaries from obstacles_access_hcs, which may need updating
                                             "healthcare_coverage,
@@ -161,7 +202,10 @@ check_list<-data.frame(name=c("healthcare_coverage is yes and no obstacles",
                                             "main_cause_displacement/lack_humanitarian_aid,main_reasons/availability_humanitarian_assistance",
                                             "main_cause_displacement/far_friend_family,main_reasons/location_friends_family",
                                             "main_cause_displacement/other,main_reasons/other",
-                                            "hh_size,hh_size_roster"),
+                                            
+                                            "hh_size,hh_size_roster",
+                                            
+                                            "highest_hh_education_level"),
                        description =c( "All members of the HH doesnt have access to Healtcare but no obstacles in accessing healthcare",
                                        "lack of security is a reason for leaving a site yet relative safety is not selected in reasons for coming to site",
                                        "economic_migration is a reason for leaving a site yet Economic migration is not selected in reasons for coming to site",
@@ -170,16 +214,10 @@ check_list<-data.frame(name=c("healthcare_coverage is yes and no obstacles",
                                        "lack_humanitarian_aid is a reason for leaving a site yet availability_humanitarian_assistance is not selected in reasons for coming to site",
                                        "far_friend_family is a reason for leaving a site yet location_friends_family is not selected in reasons for coming to site",
                                        "other is a reason for leaving a site yet other is not selected in reasons for coming to site",
-                                       "hh_size is different  from the number of people in the HH roster ")
+                                       "hh_size is different  from the number of people in the HH roster",
+                                       "The highest level of education provided in the roster is higher than the highest level of education given for the household. See column 'roster_max_school_attend', and change the answer to be less than this")
 )
 }
-
-check_list$columns_to_clean <- strsplit(check_list$columns_to_clean, ",\\s*")
-
-
-
-
-
 
 ##group data by FO
 group_by_fo <- data_in_processing %>%
@@ -215,7 +253,7 @@ cleaning_log <- output %>%
                add_info_to_cleaning_log(
                  dataset = "checked_dataset",
                  cleaning_log = "cleaning_log",
-                 information_to_add = c("idp_hc_code", "site_name", "localisation_region_label", "localisation_district_label", "enum_name", "fo_in_charge")
+                 information_to_add = c("roster_max_school_attend", "idp_hc_code", "site_name", "localisation_region_label", "localisation_district_label", "enum_name", "fo_in_charge")
                )
   )
 
@@ -248,6 +286,4 @@ cleaning_log %>% purrr::map(~ create_xlsx_cleaning_log(.[],
                                                                             "_",
                                                                             date_time_now,
                                                                             ".xlsx")))
-
-
 
