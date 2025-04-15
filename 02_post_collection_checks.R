@@ -5,14 +5,26 @@ rm(list = ls())
 library(tidyverse)
 library(readxl)
 
+## FO data
+fo_district_mapping <- read_excel("02_input/fo_base_assignment_DSRA_II.xlsx") %>%
+  select(district_name = district, "district" = district_p_code, "fo" = fo_in_charge_for_code) 
+
 ## raw data
-raw_data <- ImpactFunctions::get_kobo_data(asset_id = "aW6uBCHTZhSbzuH6JzrcnU", un = "abdirahmanaia") 
+raw_data <- ImpactFunctions::get_kobo_data(asset_id = "aBfWuR6hn3cdMJDLRyTVKD", un = "abdirahmanaia") 
 raw_kobo_data <- raw_data %>%
   pluck("main") %>%
   dplyr::rename(survey_uuid = uuid,
                 uuid =`_uuid`)
 
 
+## tool
+
+
+kobo_tool_name <- "02_input/DSRA_II_Tool.xlsx"
+
+# read in the survey questions / choices
+kobo_survey <- read_excel(kobo_tool_name, sheet = "survey")
+kobo_choice <- read_excel(kobo_tool_name, sheet = "choices")
 
 # Define directory pattern
 dir_path <- "01_cleaning_logs"
@@ -51,12 +63,15 @@ dlog_list <- list.files(dlogs_path, pattern = "deletion_log.*\\.xlsx$", recursiv
 
 all_dlogs <- dlog_list %>%
   map_dfr(., sheet = 'Sheet1', read_and_clean) %>%
+  distinct() %>%
   pull(uuid)
 
+raw_kobo_data_nas <- raw_kobo_data %>%
+  mutate(interview_duration = NA)
 
 ## now apply the clog and the clog using cleaningtools code
 
-my_clean_data <- create_clean_data(raw_dataset = raw_kobo_data,
+my_clean_data <- create_clean_data(raw_dataset = raw_kobo_data_nas,
                                    raw_data_uuid_column = "uuid",
                                    cleaning_log = cleaning_logs, 
                                    cleaning_log_uuid_column = "uuid",
@@ -75,16 +90,23 @@ my_clean_data <- my_clean_data %>%
 my_clean_data %>%
   writexl::write_xlsx(., paste0('03_output/daily_cleaned_data/all_clean_data_', today(), '.xlsx'))
 
+
+## only need to run it if you want
+
 ## soft duplicates
 
-enum_typos <- my_clean_data %>%
-  dplyr::count(enum_code) %>%
-  filter(n < 3) %>%
-  pull(enum_code)
+my_clean_data_added <- my_clean_data %>%
+  mutate(idp_hc_code = ifelse(is.na(idp_code), village, idp_code)) %>%
+  left_join(fo_district_mapping)
 
-group_by_enum <- data_in_processing %>%
-  filter(!(enum_code %in% enum_typos)) %>%
-  group_by(enum_code)
+enum_typos <- my_clean_data_added %>%
+  dplyr::count(enum_name) %>%
+  filter(n >= 5) %>%
+  pull(enum_name)
+
+group_by_enum <- my_clean_data_added %>%
+  filter(enum_name %in% enum_typos) %>%
+  group_by(enum_name)
 
 soft_per_enum <- group_by_enum %>%
   dplyr::group_split() %>%
@@ -94,7 +116,7 @@ soft_per_enum <- group_by_enum %>%
                                      idnk_value = "dnk",
                                      sm_separator = "/",
                                      log_name = "soft_duplicate_log",
-                                     threshold = 10
+                                     threshold = 7
   )
   )
 
@@ -107,15 +129,16 @@ similar_surveys <- soft_per_enum %>%
   ) %>%
   do.call(dplyr::bind_rows, .)
 
+
 similar_surveys_with_info <- similar_surveys %>%
-  left_join(data_in_processing, by = "uuid") %>%
-  select(fo_in_charge_for_code, district, settlement, start, end, uuid, issue, enum, num_cols_not_NA, total_columns_compared, num_cols_dnk, id_most_similar_survey, number_different_columns)
+  left_join(my_clean_data_added, by = "uuid") %>%
+  select(district, idp_hc_code, fo, start, end, uuid, issue, enum_name, num_cols_not_NA, total_columns_compared, num_cols_dnk, id_most_similar_survey, number_different_columns) 
 
 
-similar_survey_raw_data <- data_in_processing %>%
+similar_survey_raw_data <- my_clean_data %>%
   filter(uuid %in% (similar_surveys_with_info$uuid))
 
-similar_survey_export_path <- paste0("../04_data_cleaning/_similar_survey_checks/similar_surveys_", date_time_now, ".xlsx")
+similar_survey_export_path <- paste0("03_output/similar_survey_checks/similar_surveys_", today(), ".xlsx")
 
 # create a workbook with our data
 wb <- createWorkbook()

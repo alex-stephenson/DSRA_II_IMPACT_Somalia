@@ -1,16 +1,20 @@
 rm(list=ls())
 # load up our packages
+
 library(cleaningtools)
 library(tidyverse)
 library(readxl)
 library(openxlsx)
 library(ImpactFunctions)
-#source("functions/cleaning_functions.R")
 
-# get the timestamp to more easily keep track of different versions
+#source("functions/cleaning_functions.R")
+# install.packages("devtools")
+# devtools::install_github("alex-stephenson/ImpactFunctions")
+# install_github("alex-stephenson/ImpactFunctions")
+## get the timestamp to more easily keep track of different versions
 date_time_now <- format(Sys.time(), "%b_%d_%Y_%H%M%S")
 #raw_data<-read_excel("input/2024_REACH_SOM_DSRA_-_all_versions_-_False_-_2024-03-18-06-22-17.xlsx")
-raw_kobo <- ImpactFunctions::get_kobo_data(asset_id = "aW6uBCHTZhSbzuH6JzrcnU", un = "abdirahmanaia")
+raw_kobo <- ImpactFunctions::get_kobo_data(asset_id = "aBfWuR6hn3cdMJDLRyTVKD", un = "abdirahmanaia")
 
 
 raw_kobo_data <- raw_kobo %>%
@@ -24,7 +28,7 @@ site_data <- read_csv("04_tool/239_site_lookup.csv")
 
 version_count <- n_distinct(raw_kobo_data$`__version__`)
 if (version_count > 1) {
-  stop("There are multiple versions of the tool in use")
+  print("There are multiple versions of the tool in use")
 }
 
 
@@ -39,6 +43,11 @@ raw_kobo_data<- raw_kobo_data %>%
   mutate(site_name = ifelse(is.na(site_name), village, site_name))
 
 
+raw_kobo_data %>%
+  write_csv(., "03_output/raw_data/raw_kobo_output.csv")
+
+
+
 
 ###getting hh size from roster
 roster_count<-raw_kobo_roster %>% 
@@ -50,6 +59,9 @@ data_in_processing <-raw_kobo_data %>% left_join(roster_count,by= join_by("insta
 
 
 kobo_tool_name <- "02_input/DSRA_II_Tool.xlsx"
+
+kobo_tool_name <- "../../02_Data_Collection/02_Tool/REACH_2025_SOM_DSRA_II_Survey_Tool.xlsx"
+
 
 # read in the survey questions / choices
 kobo_survey <- read_excel(kobo_tool_name, sheet = "survey")
@@ -75,12 +87,12 @@ maxdur_flag <- 70
 
 kobo_settings_output <- robotoolbox::kobo_settings()
 
-kobo_test_output <- get_kobo_metadata(dataset = data_in_processing, asset_id = "aW6uBCHTZhSbzuH6JzrcnU")
+data_in_processing <- get_kobo_metadata(dataset = data_in_processing, asset_id = "aBfWuR6hn3cdMJDLRyTVKD")
 
-set.seed(123)
-data_in_processing <- data_in_processing %>%
-  rowwise() %>%
-  mutate(interview_duration = round(runif(1, min= 10, max = 100))) 
+# set.seed(123)
+# data_in_processing <- data_in_processing %>%
+#   rowwise() %>%
+#   mutate(interview_duration = round(runif(1, min= 10, max = 100)))
 
 
 data_in_processing <- data_in_processing %>%
@@ -100,24 +112,50 @@ data_in_processing %>%
          `Too short` = replace_na(`Too short`, 0),
          total = Okay + `Too long` + `Too short`) %>%
   writexl::write_xlsx(., paste0('03_output/time_checks/time_check.xlsx'))
+#if one of them(too short or too long ) is not found then will use this second code
+# data_in_processing %>%
+#   count(fo_in_charge, length_valid) %>%
+#   pivot_wider(
+#     names_from = length_valid,
+#     values_from = n,
+#     values_fill = 0
+#   ) %>%
+#   mutate(total = Okay + `Too long`) %>%
+#   writexl::write_xlsx(., '03_output/time_checks/time_check.xlsx')
 
 
+
+# data_in_processing %>%
+#   filter(length_valid != "Okay") %>%
+#   select(uuid) %>%
+#   mutate(comment = 'Interview length too short or too long') %>%
+#   writexl::write_xlsx(., paste0("03_output/deletion_log/deletion_log_", today(), ".xlsx"))
+################update the above code and added site name and enumerator code to facilitate FO to identify easily.(date changes occured/10/04/25)
 data_in_processing %>%
   filter(length_valid != "Okay") %>%
-  select(uuid) %>%
-  mutate(comment = 'Interview length too short or too long') %>%
+  select(uuid, site_name, enum_name) %>%
+  mutate(comment = 'Interview length too short or too long')%>%
   writexl::write_xlsx(., paste0("03_output/deletion_log/deletion_log_", today(), ".xlsx"))
 
+## filter only valid surveys and for the specific date
 data_in_processing <- data_in_processing %>%
-  filter(length_valid == "Okay")
+  filter(length_valid == "Okay") %>%
+  filter(today == "2025-04-14")
 
-##removing trailing spaces in variable names
-data_in_processing<-as.data.frame(apply(data_in_processing,2, function(x) gsub("\\s+", "", x)))
+# ## Create GPS file
+# gps<-data_in_processing %>% 
+#   select(uuid,contains("region"),contains("district"),contains("idp_hc"),contains("gps")) %>%
+#   select(-district_origin, -region_origin)
+# writexl::write_xlsx(gps,paste0("03_output/gps/gps_check_",today(),".xlsx"))
+#make change to this code coz Hezron requested to add Fo
+gps <- data_in_processing %>% 
+  select(uuid, contains("region"), contains("district"), contains("idp_hc"), contains("gps"), fo_in_charge,enum_name) %>%
+  select(-district_origin, -region_origin)
+writexl::write_xlsx(gps,paste0("03_output/gps/gps_check_",today(),".xlsx"))
 
-## Create GPS file
-gps<-data_in_processing %>% 
-  select(uuid,contains("region"),contains("district"),contains("idp_hc"),contains("gps"))
-writexl::write_xlsx(gps,paste("output/gps/gps_check_",today(),".xlsx"))
+
+
+
 
 ## Specify logical checks
 
@@ -151,7 +189,7 @@ data_in_processing <- data_in_processing %>%
   left_join(roster_school_data) %>% 
   mutate(edu_roster_flag = ifelse(roster_max_school_attend_numeric > highest_edu_numeric, TRUE, FALSE))
 
-
+## logical checks
 {
 check_list<-data.frame(name=c("healthcare_coverage is yes and no obstacles",
                               "securit_considerations in main_cause_displacement and no  relative_safety in main_reasons ",
@@ -286,4 +324,17 @@ cleaning_log %>% purrr::map(~ create_xlsx_cleaning_log(.[],
                                                                             "_",
                                                                             date_time_now,
                                                                             ".xlsx")))
+
+
+
+
+
+
+
+
+
+
+
+
+
 
