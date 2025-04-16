@@ -38,14 +38,12 @@ clean_data <- clean_data_raw %>%
 rm(clean_data_raw)
 
 ### deletion log
-dlogs_path <- "03_output/deletion_log"
 
-dlog_list <- list.files(dlogs_path, pattern = "deletion_log.*\\.xlsx$", recursive = TRUE, full.names = TRUE)
+all_dlogs <- readxl::read_excel("03_output/deletion_log/deletion_log.xlsx")
 
-all_dlogs <- dlog_list %>%
-  map_dfr(read_excel, .id = "file_name") %>%
-  filter(!is.na(site_name))%>%
-  distinct(uuid, .keep_all = T)
+manual_dlog <- readxl::read_excel("03_output/deletion_log_manual/DSRA_II_Manual_Deletion_Log.xlsx")
+
+all_dlogs <- rbind(all_dlogs, manual_dlog)
 
 ### Sampling data
 ## over sampling
@@ -108,7 +106,8 @@ completion_by_FO <- KIIs_Done %>%
   group_by(fo) %>%
   summarise(total_surveys = sum(total_surveys),
             total_done = sum(surveys_done)) %>%
-  mutate(Completion_Percent = round((total_done / total_surveys) * 100, 1))
+  mutate(Completion_Percent = round((total_done / total_surveys) * 100, 1)) %>%
+  mutate(Completion_Percent = ifelse(Completion_Percent > 100, 100, Completion_Percent))
 
 ### OPZ burndown
 # Parameters for the ideal burndown chart
@@ -246,7 +245,7 @@ server <- function(input, output, session) {
   
   # Reactable for OPZ Completion
   output$reactable_OPZ <- renderReactable({
-    reactable(KIIs_Done, searchable = TRUE, bordered = TRUE)
+    reactable(KIIs_Done, searchable = TRUE, bordered = TRUE, filterable = TRUE)
   })
   
   # Download for OPZ Completion

@@ -17,6 +17,10 @@ raw_kobo_data <- raw_data %>%
                 uuid =`_uuid`)
 
 
+raw_kobo_roster <- raw_data %>%
+  pluck("hh_roster")
+
+
 ## tool
 
 
@@ -55,19 +59,12 @@ cleaning_logs <- cleaning_logs %>%
 
 # now read in the deletion log
 
-## all dlogs
-dlogs_path <- r"(03_output\deletion_log)"
 
-# List all .xlsx files that contain 'cleaning_log' in the name
-dlog_list <- list.files(dlogs_path, pattern = "deletion_log.*\\.xlsx$", recursive = TRUE, full.names = TRUE)
 
-all_dlogs <- dlog_list %>%
-  map_dfr(., sheet = 'Sheet1', read_and_clean) %>%
-  distinct() %>%
-  pull(uuid)
 
 raw_kobo_data_nas <- raw_kobo_data %>%
   mutate(interview_duration = NA)
+
 
 ## now apply the clog and the clog using cleaningtools code
 
@@ -83,17 +80,31 @@ my_clean_data <- create_clean_data(raw_dataset = raw_kobo_data_nas,
 
 
 ## now remove dlog
+all_dlogs <- readxl::read_excel(r"(03_output/deletion_log/deletion_log.xlsx)")
+manual_dlog <- readxl::read_excel("03_output/deletion_log_manual/DSRA_II_Manual_Deletion_Log.xlsx") %>%
+  pull(uuid)
+
 
 my_clean_data <- my_clean_data %>%
-  filter(! uuid %in% all_dlogs)
+  filter(! uuid %in% all_dlogs$uuid & ! uuid %in% manual_dlog)
+
+my_clean_roster_data <- raw_kobo_roster %>% 
+  filter(parent_instance_name %in% my_clean_data$instance_name)
+
+all_clean_data <- list("clean_HH_data" = my_clean_data, "clean_roster_data" = my_clean_roster_data)
 
 my_clean_data %>%
   writexl::write_xlsx(., paste0('03_output/daily_cleaned_data/all_clean_data_', today(), '.xlsx'))
 
+all_clean_data %>% 
+  writexl::write_xlsx(., "03_output/final_cleaned_data/SOM_DSRA_II_Output.xlsx")
 
 ## only need to run it if you want
 
 ## soft duplicates
+
+## read in already approved ones
+exclusions <- read_excel("03_output/similar_survey_checks/exclusions.xlsx")
 
 my_clean_data_added <- my_clean_data %>%
   mutate(idp_hc_code = ifelse(is.na(idp_code), village, idp_code)) %>%
@@ -132,7 +143,9 @@ similar_surveys <- soft_per_enum %>%
 
 similar_surveys_with_info <- similar_surveys %>%
   left_join(my_clean_data_added, by = "uuid") %>%
-  select(district, idp_hc_code, fo, start, end, uuid, issue, enum_name, num_cols_not_NA, total_columns_compared, num_cols_dnk, id_most_similar_survey, number_different_columns) 
+  select(district, idp_hc_code, fo, start, end, uuid, issue, enum_name, num_cols_not_NA, total_columns_compared, num_cols_dnk, id_most_similar_survey, number_different_columns) %>% 
+  rowwise() %>%
+  filter(! uuid %in% exclusions$uuid & ! id_most_similar_survey %in% exclusions$id_most_similar_survey)
 
 
 similar_survey_raw_data <- my_clean_data %>%

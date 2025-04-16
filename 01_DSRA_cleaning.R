@@ -7,10 +7,6 @@ library(readxl)
 library(openxlsx)
 library(ImpactFunctions)
 
-#source("functions/cleaning_functions.R")
-# install.packages("devtools")
-# devtools::install_github("alex-stephenson/ImpactFunctions")
-# install_github("alex-stephenson/ImpactFunctions")
 ## get the timestamp to more easily keep track of different versions
 date_time_now <- format(Sys.time(), "%b_%d_%Y_%H%M%S")
 #raw_data<-read_excel("input/2024_REACH_SOM_DSRA_-_all_versions_-_False_-_2024-03-18-06-22-17.xlsx")
@@ -47,8 +43,6 @@ raw_kobo_data %>%
   write_csv(., "03_output/raw_data/raw_kobo_output.csv")
 
 
-
-
 ###getting hh size from roster
 roster_count<-raw_kobo_roster %>% 
   group_by(parent_instance_name) %>% 
@@ -80,8 +74,8 @@ fo_district_mapping <- read_excel("02_input/fo_base_assignment_DSRA_II.xlsx") %>
 uuid <- "uuid"
 mindur <- 15
 mindur_flag <- 20
-maxdur <- 60
-maxdur_flag <- 70
+maxdur <- 80
+maxdur_flag <- 80
 
 # Survey time check function
 
@@ -89,10 +83,6 @@ kobo_settings_output <- robotoolbox::kobo_settings()
 
 data_in_processing <- get_kobo_metadata(dataset = data_in_processing, asset_id = "aBfWuR6hn3cdMJDLRyTVKD")
 
-# set.seed(123)
-# data_in_processing <- data_in_processing %>%
-#   rowwise() %>%
-#   mutate(interview_duration = round(runif(1, min= 10, max = 100)))
 
 
 data_in_processing <- data_in_processing %>%
@@ -101,6 +91,7 @@ data_in_processing <- data_in_processing %>%
     interview_duration > maxdur ~ "Too long",
     TRUE ~ "Okay"
   ))
+
 
 
 ## produce an output for tracking how many surveys are being deleted
@@ -112,49 +103,26 @@ data_in_processing %>%
          `Too short` = replace_na(`Too short`, 0),
          total = Okay + `Too long` + `Too short`) %>%
   writexl::write_xlsx(., paste0('03_output/time_checks/time_check.xlsx'))
-#if one of them(too short or too long ) is not found then will use this second code
-# data_in_processing %>%
-#   count(fo_in_charge, length_valid) %>%
-#   pivot_wider(
-#     names_from = length_valid,
-#     values_from = n,
-#     values_fill = 0
-#   ) %>%
-#   mutate(total = Okay + `Too long`) %>%
-#   writexl::write_xlsx(., '03_output/time_checks/time_check.xlsx')
 
 
-
-# data_in_processing %>%
-#   filter(length_valid != "Okay") %>%
-#   select(uuid) %>%
-#   mutate(comment = 'Interview length too short or too long') %>%
-#   writexl::write_xlsx(., paste0("03_output/deletion_log/deletion_log_", today(), ".xlsx"))
 ################update the above code and added site name and enumerator code to facilitate FO to identify easily.(date changes occured/10/04/25)
 data_in_processing %>%
-  filter(length_valid != "Okay") %>%
-  select(uuid, site_name, enum_name) %>%
-  mutate(comment = 'Interview length too short or too long')%>%
-  writexl::write_xlsx(., paste0("03_output/deletion_log/deletion_log_", today(), ".xlsx"))
+  filter(length_valid != "Okay") %>% 
+  select(uuid, site_name, enum_name, interview_duration) %>%
+  mutate(comment = 'Interview length too short or too long') %>%
+  writexl::write_xlsx(., paste0("03_output/deletion_log/deletion_log.xlsx"))
 
 ## filter only valid surveys and for the specific date
 data_in_processing <- data_in_processing %>%
   filter(length_valid == "Okay") %>%
-  filter(today == "2025-04-14")
+  filter(today == "2025-04-15")
 
 # ## Create GPS file
-# gps<-data_in_processing %>% 
-#   select(uuid,contains("region"),contains("district"),contains("idp_hc"),contains("gps")) %>%
-#   select(-district_origin, -region_origin)
-# writexl::write_xlsx(gps,paste0("03_output/gps/gps_check_",today(),".xlsx"))
-#make change to this code coz Hezron requested to add Fo
+
 gps <- data_in_processing %>% 
   select(uuid, contains("region"), contains("district"), contains("idp_hc"), contains("gps"), fo_in_charge,enum_name) %>%
   select(-district_origin, -region_origin)
 writexl::write_xlsx(gps,paste0("03_output/gps/gps_check_",today(),".xlsx"))
-
-
-
 
 
 ## Specify logical checks
