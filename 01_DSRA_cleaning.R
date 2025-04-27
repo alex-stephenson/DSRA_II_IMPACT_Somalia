@@ -9,7 +9,7 @@ library(ImpactFunctions)
 
 ## get the timestamp to more easily keep track of different versions
 date_time_now <- format(Sys.time(), "%b_%d_%Y_%H%M%S")
-#raw_data<-read_excel("input/2024_REACH_SOM_DSRA_-_all_versions_-_False_-_2024-03-18-06-22-17.xlsx")
+
 raw_kobo <- ImpactFunctions::get_kobo_data(asset_id = "aBfWuR6hn3cdMJDLRyTVKD", un = "abdirahmanaia")
 
 
@@ -19,6 +19,8 @@ raw_kobo_data <- raw_kobo %>%
 raw_kobo_roster <- raw_kobo %>%
   pluck("hh_roster")
 
+raw_kobo_roster %>%
+  write_csv(., "03_output/raw_data/raw_roster_output.csv")
 
 site_data <- read_csv("04_tool/239_site_lookup.csv")
 
@@ -26,6 +28,13 @@ version_count <- n_distinct(raw_kobo_data$`__version__`)
 if (version_count > 1) {
   print("There are multiple versions of the tool in use")
 }
+
+## manual recoding due to enum error
+
+raw_kobo_data <- raw_kobo_data %>% 
+  mutate(village = if_else(village == "Kismaayo" & enum_name == "27407" & today == "2025-04-20", "Luglaaw", village)) %>% 
+  mutate(idp_code = ifelse(idp_code == "CCCM-SO2401-0415", "CCCM-SO2401-0416", idp_code))
+
 
 
 ###renaming uuid
@@ -81,7 +90,13 @@ maxdur_flag <- 80
 
 kobo_settings_output <- robotoolbox::kobo_settings()
 
-data_in_processing <- get_kobo_metadata(dataset = data_in_processing, asset_id = "aBfWuR6hn3cdMJDLRyTVKD")
+kobo_data_metadata <- get_kobo_metadata(dataset = data_in_processing, un = "abdirahmanaia", asset_id = "aBfWuR6hn3cdMJDLRyTVKD")
+
+data_in_processing <- kobo_data_metadata$df_and_duration
+
+raw_metadata_length <- kobo_data_metadata$audit_files_length
+
+write_rds(raw_metadata_length, "03_output/raw_data/raw_metadata.rds")
 
 
 
@@ -91,7 +106,6 @@ data_in_processing <- data_in_processing %>%
     interview_duration > maxdur ~ "Too long",
     TRUE ~ "Okay"
   ))
-
 
 
 ## produce an output for tracking how many surveys are being deleted
@@ -115,7 +129,7 @@ data_in_processing %>%
 ## filter only valid surveys and for the specific date
 data_in_processing <- data_in_processing %>%
   filter(length_valid == "Okay") %>%
-  filter(today == "2025-04-15")
+  filter(today == "2025-04-26")
 
 # ## Create GPS file
 
@@ -270,7 +284,11 @@ cleaning_log <- output %>%
 # readme: explanations of different actions we could take to remedy the data issues found
 
 # write to each FO's cleaning log folder
-cleaning_log %>% purrr::map(~ create_xlsx_cleaning_log(.[], 
+
+
+
+cleaning_log %>% 
+  purrr::map(~ create_xlsx_cleaning_log(.[], 
                                                        cleaning_log_name = "cleaning_log",
                                                        change_type_col = "change_type",
                                                        column_for_color = "check_binding",

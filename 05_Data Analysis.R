@@ -5,127 +5,252 @@
 
 rm(list = ls())
 
-options(scipen = 999)
-
-if (!require("pacman")) install.packages("pacman")
-pacman::p_load(tidyverse, hypegrammaR, rio, readxl, openxlsx)
-
-source(r"(C:\Users\alex.stephenson\ACTED\IMPACT SOM - 02_Research\01_REACH\2023_24\03_DDSU\SOM2401_DSRA\03_Data\03_Data\DSRA\functions/05_Results Table - Support Functions.R)")
-
-# write the aggregation file with a timestamp to more easily keep track of different versions
-date_time_now <- format(Sys.time(), "%a_%b_%d_%Y_%H%M%S")
+library(tidyverse)
+library(cleaningtools)
+library(analysistools)
+library(presentresults)
 
 ##############################################################################
 ########################## Load the Data and Survey ##########################
 ##############################################################################
 
-# read in the kobo tool survey and choices sheets
-kobo_tool_name <- r"(C:\Users\alex.stephenson\ACTED\IMPACT SOM - 01_REACH\2023_24\03_DDSU\SOM2401_DSRA\03_Data/03_Data/DSRA/tool/dsra_tool.xlsx)"
-questions <- read_excel(kobo_tool_name, "survey")
-# choices <- read_excel(kobo_tool_name, "choices")
+
+## tool
+kobo_tool_name <- "02_input/DSRA_II_Tool.xlsx"
+
+# read in the survey questions / choices
+kobo_survey <- read_excel(kobo_tool_name, sheet = "survey") %>%
+  mutate(type = str_squish(type))  %>% 
+  mutate(`label::English (en)` = ifelse(`label::English (en)` == "A.4 In which region is the assessment being conducted?" & type == "calculate", "", `label::English (en)`))
+
+kobo_choice <- read_excel(kobo_tool_name, sheet = "choices") %>% 
+  filter(list_name != "land_ownership" & is.na(code))
 
 # load datasets for processing
-file_path <- r"(C:\Users\alex.stephenson\ACTED\IMPACT SOM - 01_REACH\2023_24\03_DDSU\SOM2401_DSRA\03_Data/03_Data/DSRA/REACH2401_DSRA_DATA&ANALYSIS_HQ REVIEW.xlsx)"
-main_data <- read_excel(file_path, 'Clean_Data')
-hh_roster <- read_excel(file_path, 'Clean_Data_hh_roster')
-
-################################################################################
-############################# Narrow our data down #############################
-################################################################################
-
-#########################Making sure numerical variables are formatted correctly#########################################
-num_q <- questions %>% filter(name %in% c("hh_size")) %>% pull(name)
-
-num_q <- num_q[num_q %in% names(main_data)]
-
-main_data <- mutate_at(main_data,num_q,as.numeric)
-
-# Concatenating 'region' and 'idp' columns into a new column 'region_idp_combined'
-main_data$localisation_region_idp_code_combined <- paste0(main_data$localisation_region, main_data$idp_code)
-
-# Print the first few rows to verify the changes
-head(main_data)
-# Concatenating 'region' and 'host_community' columns into a new column 'region_host_community_combined'
-main_data$localisation_region_idp_host_community_combined <- paste0(main_data$localisation_region, main_data$idp_host_community)
-
-# Print the first few rows to verify the changes
-head(main_data)
-
-#####################Data collection was in idp sites as well as the respective district capitals, and this sections is basically 
-##to create an extra column for classifing the settlements and idps in one column
-main_data$idp_host_community_grouped<-ifelse(main_data$idp_host_community=="host_community" ,paste0(main_data$localisation_district_label,"_city"),
-                                             ifelse(main_data$idp_host_community=="idp_site",paste0(main_data$idp_code),NA))
+file_path <- "03_output/final_cleaned_data/SOM_DSRA_II_Output.xlsx"
+main_data <- read_excel(file_path, 'clean_HH_data') %>%
+  mutate(hh_size = as.numeric(hh_size))
+clean_roster <- read_excel(file_path, 'clean_roster_data')
+raw_data <- read_excel(file_path, 'raw_HH_data')
+raw_roster_data <- read_excel(file_path, 'raw_roster_data')
 
 
+## load cleaning_logs
+cleaning_logs <- readxl::read_excel("03_output/combined_cleaning_log/combined_cleaning_log.xlsx")
 
-names(main_data)[names(main_data) == "_uuid"] <- "uuid" 
+## load deletion log
+all_dlogs <- readxl::read_excel(r"(03_output/deletion_log/deletion_log.xlsx)", col_types = "text")
+manual_dlog <- readxl::read_excel("03_output/deletion_log_manual/DSRA_II_Manual_Deletion_Log.xlsx", col_types = "text")
 
-###############Rename the mogadishu districts for the sake of adding weights
-
-main_data <- main_data %>%
-  mutate(idp_host_community_grouped = case_when(idp_host_community_grouped == "Dayniile_city" ~ "Mogadishu_city" ,
-                                                idp_host_community_grouped == "Khada_city" ~ "Mogadishu_city" ,
-                                                    TRUE ~ as.character(idp_host_community_grouped)))
+deletion_log <- bind_rows(all_dlogs, manual_dlog)
 
 
+## join relevant info 
+
+clean_roster <- clean_roster %>%
+  left_join(main_data %>% 
+              select(instance_name, idp_hc_code, site_name, localisation_district_label, localisation_region_label),
+            by = join_by("parent_instance_name" == "instance_name"))
+
+## load in the LOA
+
+loa <- readxl::read_excel("02_input/analysis_loa_all_data.xlsx")
+loa_roster <- readxl::read_excel("02_input/analysis_loa_roster.xlsx")
 
 ###################################apply weights##################################################################
-sampling.frame <- read.csv(r"(C:\Users\alex.stephenson\ACTED\IMPACT SOM - 02_Research\01_REACH\2023_24\03_DDSU\SOM2401_DSRA\03_Data/03_Data/DSRA/sample_frame/sampling_frame.csv)", stringsAsFactors = FALSE)
 
-weighting_function <-map_to_weighting(sampling.frame = sampling.frame,
-                                      data.stratum.column = "idp_host_community_grouped",
-                                      sampling.frame.population.column = "population",
-                                      sampling.frame.stratum.column = "idp_code",
-                                      data = main_data)
-main_data[["weights"]] <-  weighting_function(main_data)
+hc_hh_size <- main_data %>% 
+  filter(idp_host_community == "host_community") %>% 
+  group_by(idp_hc_code) %>% 
+  summarise(hh_size = mean(hh_roster_count, na.rm = T))
+
+  
+sampling_df_idp <- readxl::read_excel('02_input/DSRA_II_Sampling_Info.xlsx', sheet = "IDP") %>%
+  select(idp_hc_code = idp_code, site_name, district_name = District, district = district_code, population = HH_size, sample_size, group)
+
+sampling_df_hc <- readxl::read_excel('02_input/DSRA_II_Sampling_Info.xlsx', sheet = "HC") %>%
+  janitor::clean_names() %>%
+  select(idp_hc_code = city_town_name, district_name, district,ind_population = estimated_number_of_resident_individuals ,sample_size = sample ) %>%
+  mutate(group = "Host Community",
+         site_name = idp_hc_code) %>% 
+  left_join(hc_hh_size, by = join_by("site_name" == "idp_hc_code")) %>% 
+  mutate(population = round(ind_population / hh_size)) %>% 
+  select(idp_hc_code, population, sample_size)
+
+sampling_df <- bind_rows(sampling_df_idp,sampling_df_hc) %>%
+  select(idp_hc_code, population, sample_size) %>% 
+  filter(idp_hc_code %in% main_data$idp_hc_code)
+
+
+main_data_weighted <- main_data %>%
+  add_weights(sampling_df, 
+              strata_column_dataset = "idp_hc_code",
+              strata_column_sample = "idp_hc_code",
+              population_column = "population") %>% 
+  filter((idp_hc_code != "Baidoa"))
+
+
+############################### create HH survey design and analysis #################################################
+
+
+DSRA_II_Survey_Design <- main_data_weighted %>% 
+  srvyr::as_survey_design(., strata = "idp_hc_code", weights = weights)
+
+my_analysis <- create_analysis(DSRA_II_Survey_Design, loa = loa, sm_separator = "/")
+
+results_table <- my_analysis$results_table
+
+review_kobo_labels_results <- review_kobo_labels(kobo_survey,
+                                                 kobo_choice,
+                                                 label_column = "label::English (en)",
+                                                 results_table = results_table)
+
+label_dictionary <- create_label_dictionary(kobo_survey, 
+                                            kobo_choice, 
+                                            label_column = "label::English (en)",
+                                            results_table = results_table)
+
+results_table_labeled <- add_label_columns_to_results_table(
+  results_table,
+  label_dictionary
+)
+
+#### create long output tables::
+
+### percentage tables
+df_main_analysis_table <- presentresults::create_table_variable_x_group(
+  results_table = results_table_labeled, 
+  value_columns = "stat")
+
+# Replace NA values in list and non-listcolumns with NULL
+
+df_main_analysis_table <- df_main_analysis_table %>%
+  mutate(across(where(is.list), ~ map(.x, ~ ifelse(is.na(.x), list(NULL), .x)))) %>% 
+  mutate(across(where(~ !is.list(.x) & is.numeric(.x)), ~ replace(.x, is.na(.x), NA))) %>%
+  mutate(across(where(~ !is.list(.x) & !is.numeric(.x)), ~ ifelse(is.na(.x), "NA", .x)))
 
 
 
-####################Adding weights and other relevant information to the hh_roster loop to for the purpose of analysis####################
-hh_roster$localisation_district_label <- main_data$localisation_district_label[match(hh_roster$parent_instance_name, main_data$instance_name)]#district
-hh_roster$weights <- main_data$weights[match(hh_roster$parent_instance_name, main_data$instance_name)]#weights
-hh_roster$localisation_region_label <- main_data$localisation_region_label[match(hh_roster$parent_instance_name, main_data$instance_name)]#district_pop
-hh_roster$idp_host_community_grouped <- main_data$idp_host_community_grouped[match(hh_roster$parent_instance_name, main_data$instance_name)]#idp_host_community_grouped
+# Export the main analysis percentages table -------------------------
+presentresults::create_xlsx_variable_x_group(
+  table_group_x_variable = df_main_analysis_table,
+  file_path = paste0("03_output/results_tables/results_table_long_percent.xlsx"),
+  value_columns = c("stat","n"),
+  overwrite = TRUE
+)
+
+
+# Create and process the statistics table (counts: n, N, weighted) ----
+
+df_stats_table <- presentresults::create_table_variable_x_group(
+  results_table = results_table_labeled,
+  value_columns = c("n")
+)
+
+# Handle NA values in df_stats_table
+df_stats_table <- df_stats_table %>%
+  mutate(across(where(is.list), ~ map(.x, ~ ifelse(is.na(.x), list(NULL), .x)))) %>%
+  mutate(across(where(~ !is.list(.x)), ~ ifelse(is.na(.x), "", .x))) %>% 
+  mutate(across(where(~ !is.list(.x) & !is.numeric(.x)), ~ ifelse(is.na(.x), "NA", .x)))
+
+# Export the processed stats table to Excel
+presentresults::create_xlsx_variable_x_group(
+  table_group_x_variable = df_stats_table,  # Use the processed table
+  file_path = paste0("03_output/results_tables/results_table_long_values.xlsx"),
+  value_columns = c("n"),
+  overwrite = TRUE  
+)
+
+
+############################### create ROSTER survey design and analysis #################################################
+
+
+clean_roster_weighted <- clean_roster %>% 
+  add_weights(sampling_df, 
+              strata_column_dataset = "idp_hc_code",
+              strata_column_sample = "idp_hc_code",
+              population_column = "population")
+
+Roster_Survey_Design <- clean_roster_weighted %>% 
+  srvyr::as_survey_design(., strata = "idp_hc_code", weights = weights)
+
+roster_analysis <- create_analysis(Roster_Survey_Design, loa = loa_roster, sm_separator = "/")
+
+roster_results_table <- roster_analysis$results_table
+
+
+roster_results_table_labeled <- add_label_columns_to_results_table(
+  roster_results_table,
+  label_dictionary
+)
+
+### percentage tables
+df_roster_analysis_table <- presentresults::create_table_variable_x_group(
+  results_table = roster_results_table_labeled, 
+  value_columns = "stat")
+
+# Replace NA values in list columns with NULL
+
+df_roster_analysis_table <- df_roster_analysis_table %>%
+  mutate(across(where(is.list), ~ map(.x, ~ ifelse(is.na(.x), list(NULL), .x)))) %>% 
+  mutate(across(where(~ !is.list(.x) & is.numeric(.x)), ~ replace(.x, is.na(.x), NA))) %>%
+  mutate(across(where(~ !is.list(.x) & !is.numeric(.x)), ~ ifelse(is.na(.x), "NA", .x)))
+
+
+# Export the main analysis percentages table -------------------------
+presentresults::create_xlsx_variable_x_group(
+  table_group_x_variable = df_roster_analysis_table,
+  file_path = paste0("03_output/results_tables/roster_results_table_long_percent.xlsx"),
+  value_columns = c("stat","n"),
+  overwrite = TRUE
+)
+
+
+# Create and process the statistics table (counts: n, N, weighted) ----
+
+df_roster_stats_table <- presentresults::create_table_variable_x_group(
+  results_table = roster_results_table_labeled,
+  value_columns = c("n")
+)
+
+# Handle NA values in df_stats_table
+df_roster_stats_table <- df_roster_stats_table %>%
+  mutate(across(where(is.list), ~ map(.x, ~ ifelse(is.na(.x), list(NULL), .x)))) %>%
+  mutate(across(where(~ !is.list(.x)), ~ ifelse(is.na(.x), "", .x))) %>% 
+  mutate(across(where(~ !is.list(.x) & !is.numeric(.x)), ~ ifelse(is.na(.x), "NA", .x)))
+
+# Export the processed stats table to Excel
+presentresults::create_xlsx_variable_x_group(
+  table_group_x_variable = df_stats_table,  # Use the processed table
+  file_path = paste0("03_output/results_tables/roster_results_table_long_values.xlsx"),
+  value_columns = c("n"),
+  overwrite = TRUE  
+)
+
+
+#### output the final data
+cols_to_remove <- c("consent_no", "instance_note", "deviceid", "audit", "enum_name", "note_tool", "note","idp_returned_issue",
+                    "idp_not_displaced","hc_displaced","date_issues","note_date_diff", "village", "idp_code",
+                    "healthcare_issue","land_tenure_check","threshold_msg_positive","threshold_msg_negative", "observation_gps", 
+                    "observation_gps_latitude", "observation_gps_longitude", "observation_gps_altitude", "observation_gps_precision",
+                    "observation_gps_wkt", "pt_sample_lat", "pt_sample_lon", "distance_to_site",
+                     "_submission_time", "_validation_status", "Longitude", "Latitude", "attachments", "instanceID",
+                    "_notes", "_status", "_submitted_by", "__version__", "_tags", "_index", "audit_URL")
+
+raw_data_no_pii <- raw_kobo_data %>% 
+  select(-any_of(cols_to_remove))
+
+main_data_weighted_no_pii <- main_data_weighted %>% 
+  select(-any_of(cols_to_remove))
+
+variable_tracker <- ImpactFunctions::create_variable_tracker(raw_kobo_data, main_data_weighted_no_pii)
+
+data_output <- list(raw_data = raw_data_no_pii, cleaned_data = main_data_weighted_no_pii, raw_roster_data = raw_roster_data, clean_roster = clean_roster)
+writexl::write_xlsx(final_output, "05_HQ_validation/01_all_data/clean_and_raw_data.xlsx")
+
+log_book_output <- list(variable_tracker = variable_tracker, raw_data = raw_data_no_pii, cleaned_data = main_data_weighted_no_pii, raw_roster_data = raw_roster_data, clean_roster = clean_roster, survey = kobo_survey, choices = kobo_choice, deletion_log = deletion_log, cleaning_logs = cleaning_logs)
+writexl::write_xlsx(final_output, "05_HQ_validation/02_all_data_and_logbook/DSRA_II_all_data_logbook.xlsx")
 
 
 
-
-
-##############################Export csv files for analysis############################
-write.csv(main_data,"fo_analysis/main_data.csv")
-
-write.csv(hh_roster,"fo_analysis/hh_roster.csv")
-                                                     
-###############################################################################################
-################################ Prepare and Write the Output #################################
-###############################################################################################
-
-questions <- read_xlsx(kobo_tool_name,
-                       guess_max = 50000,
-                       na = c("NA","#N/A",""," "),
-                       sheet = 1) %>% 
-                       filter(!is.na(name)) %>% 
-                       mutate(q.type = as.character(lapply(type, function(x) str_split(x, " ")[[1]][1])),
-                              list_name = as.character(lapply(type, function(x) str_split(x, " ")[[1]][2])),
-                              list_name = ifelse(str_starts(type, "select_"), list_name, NA))
-
-choices <- read_xlsx(kobo_tool_name,
-                     guess_max = 50000,
-                     na = c("NA","#N/A",""," "),
-                     sheet = 2)
-
-############################Load data for analysis##################
-main_data <- read.csv("fo_analysis/main_data.csv")
-hh_roster <- read.csv("fo_analysis/hh_roster.csv")
-
-res <- generate_results_table(data = hh_roster,
-                              questions = questions,
-                              choices = choices,
-                              weights.column = "weights",
-                              use_labels = T,
-                              labels_column = "label::English (en)",
-                              "idp_host_community_grouped","localisation_district_label","localisation_region_label")
-
-# add this to the path if you're running >= 2 surveys: more_than_1_settlement
-export_table(res, "fo_analysis/")
 

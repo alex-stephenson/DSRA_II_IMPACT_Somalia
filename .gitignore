@@ -6,3 +6,5 @@
 0_DSSI_scoring\input
 *.csv
 *.xlsx
+rsconnect/
+app_deploy.R

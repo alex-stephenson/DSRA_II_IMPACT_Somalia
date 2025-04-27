@@ -1,7 +1,6 @@
 rm(list = ls())
 ### post collection checks
 
-## read in all the data
 library(tidyverse)
 library(readxl)
 
@@ -10,25 +9,21 @@ fo_district_mapping <- read_excel("02_input/fo_base_assignment_DSRA_II.xlsx") %>
   select(district_name = district, "district" = district_p_code, "fo" = fo_in_charge_for_code) 
 
 ## raw data
-raw_data <- ImpactFunctions::get_kobo_data(asset_id = "aBfWuR6hn3cdMJDLRyTVKD", un = "abdirahmanaia") 
-raw_kobo_data <- raw_data %>%
-  pluck("main") %>%
-  dplyr::rename(survey_uuid = uuid,
-                uuid =`_uuid`)
+raw_kobo_data <- read_csv("03_output/raw_data/raw_kobo_output.csv")
 
-
-raw_kobo_roster <- raw_data %>%
-  pluck("hh_roster")
+raw_kobo_roster <-  read_csv("03_output/raw_data/raw_roster_output.csv")
 
 
 ## tool
-
-
 kobo_tool_name <- "02_input/DSRA_II_Tool.xlsx"
 
 # read in the survey questions / choices
-kobo_survey <- read_excel(kobo_tool_name, sheet = "survey")
+kobo_survey <- read_excel(kobo_tool_name, sheet = "survey") %>% 
+  mutate(type = stringr::str_squish(type))
+
 kobo_choice <- read_excel(kobo_tool_name, sheet = "choices")
+
+
 
 # Define directory pattern
 dir_path <- "01_cleaning_logs"
@@ -55,16 +50,19 @@ read_and_clean <- function(file, sheet) {
 cleaning_logs <- map_dfr(file_list, sheet = 'cleaning_log', read_and_clean)
 
 cleaning_logs <- cleaning_logs %>%
-  filter(!is.na(change_type))
+  filter(!is.na(change_type)) %>% ### this needs taking out at the end
+  mutate(question = ifelse(question == "hh_size_roster", "hh_roster_count", question))
 
-# now read in the deletion log
+other_clogs <- ImpactFunctions::update_others(kobo_survey, kobo_choice, cleaning_log = cleaning_logs) %>% 
+  mutate(comment = "Updated other parent values based on clogs")
 
-
+cleaning_logs_amended <- cleaning_logs %>% 
+  select(uuid, question, change_type, new_value, old_value, comment = issue) %>% 
+  bind_rows(., other_clogs)
 
 
 raw_kobo_data_nas <- raw_kobo_data %>%
   mutate(interview_duration = NA)
-
 
 ## now apply the clog and the clog using cleaningtools code
 
@@ -76,7 +74,16 @@ my_clean_data <- create_clean_data(raw_dataset = raw_kobo_data_nas,
                                    cleaning_log_new_value_column = "new_value",
                                    cleaning_log_change_type_column = "change_type")
 
+my_clean_data_parentcol <- recreate_parent_column(dataset = my_clean_data,
+                                         uuid_column = "uuid",
+                                         kobo_survey = kobo_survey,
+                                         kobo_choices = kobo_choice,
+                                         sm_separator = "/", 
+                                         cleaning_log_to_append = cleaning_logs_amended)
 
+
+
+cleaning_log <- my_clean_data_parentcol$cleaning_log
 
 
 ## now remove dlog
@@ -85,19 +92,33 @@ manual_dlog <- readxl::read_excel("03_output/deletion_log_manual/DSRA_II_Manual_
   pull(uuid)
 
 
-my_clean_data <- my_clean_data %>%
+my_clean_data <- my_clean_data_parentcol$data_with_fix_concat %>%
+  mutate(idp_hc_code = ifelse(is.na(idp_code), village, idp_code)) %>%
   filter(! uuid %in% all_dlogs$uuid & ! uuid %in% manual_dlog)
 
 my_clean_roster_data <- raw_kobo_roster %>% 
   filter(parent_instance_name %in% my_clean_data$instance_name)
 
-all_clean_data <- list("clean_HH_data" = my_clean_data, "clean_roster_data" = my_clean_roster_data)
+
+## output everything
+
+all_clean_data <- list("clean_HH_data" = my_clean_data, "clean_roster_data" = my_clean_roster_data, "raw_HH_data" = raw_kobo_data, "raw_roster_data" = raw_kobo_roster)
 
 my_clean_data %>%
   writexl::write_xlsx(., paste0('03_output/daily_cleaned_data/all_clean_data_', today(), '.xlsx'))
 
+my_clean_data %>%
+  select(!contains('/')) %>%
+  writexl::write_xlsx(., paste0('03_output/daily_cleaned_data/all_clean_data_dashboard.xlsx'))
+
+
 all_clean_data %>% 
   writexl::write_xlsx(., "03_output/final_cleaned_data/SOM_DSRA_II_Output.xlsx")
+
+cleaning_log %>% 
+  writexl::write_xlsx(., "03_output/combined_cleaning_log/combined_cleaning_log.xlsx")
+
+
 
 ## only need to run it if you want
 
@@ -107,7 +128,6 @@ all_clean_data %>%
 exclusions <- read_excel("03_output/similar_survey_checks/exclusions.xlsx")
 
 my_clean_data_added <- my_clean_data %>%
-  mutate(idp_hc_code = ifelse(is.na(idp_code), village, idp_code)) %>%
   left_join(fo_district_mapping)
 
 enum_typos <- my_clean_data_added %>%
@@ -127,7 +147,7 @@ soft_per_enum <- group_by_enum %>%
                                      idnk_value = "dnk",
                                      sm_separator = "/",
                                      log_name = "soft_duplicate_log",
-                                     threshold = 7
+                                     threshold = 5
   )
   )
 
@@ -143,9 +163,10 @@ similar_surveys <- soft_per_enum %>%
 
 similar_surveys_with_info <- similar_surveys %>%
   left_join(my_clean_data_added, by = "uuid") %>%
-  select(district, idp_hc_code, fo, start, end, uuid, issue, enum_name, num_cols_not_NA, total_columns_compared, num_cols_dnk, id_most_similar_survey, number_different_columns) %>% 
-  rowwise() %>%
-  filter(! uuid %in% exclusions$uuid & ! id_most_similar_survey %in% exclusions$id_most_similar_survey)
+  left_join(my_clean_data_added %>% select(uuid, similiar_survey_date = today), by = join_by("id_most_similar_survey" == "uuid")) %>%
+  select(district, idp_hc_code, fo, today, start, end, uuid, issue, enum_name, num_cols_not_NA, total_columns_compared, num_cols_dnk, similiar_survey_date, id_most_similar_survey, number_different_columns) %>% 
+  filter(! uuid %in% exclusions$uuid & ! id_most_similar_survey %in% exclusions$id_most_similar_survey,
+         today == similiar_survey_date)
 
 
 similar_survey_raw_data <- my_clean_data %>%
@@ -162,33 +183,6 @@ writeData(wb, 1, similar_surveys_with_info)
 writeData(wb, 2, similar_survey_raw_data)
 
 saveWorkbook(wb, similar_survey_export_path, overwrite = TRUE)
-
-
-
-
-## over sampling
-
-## step 1 - read in data containing the sample size for each CA / settlement
-
-sampling_df <- readxl::read_excel('02_input/DSRA_II_Sampling_Info.xlsx') %>%
-  select(idp_code, sample_size, group)
-
-## step 2 - calculate the number of interviews per settlement or HC, based on the existing data
-
-idp_count <- my_clean_data %>%
-  count(idp_code) %>%
-  left_join(sampling_df) %>%
-  mutate(oversampled = ifelse(n > sample_size, TRUE, FALSE))
-
-
-## step 3 - calculate which sites are oversampled
-
-## step 4 - join to any relevant data that assessment want adding - eg clog info
-
-## output for assessment input and they will make into deletion log
-
-
-
 
 ## outliers - not sure if this is necessary as there's just one integer question anyway - HH size
 # we should exclude all questions from outlier checks that aren't integer response types (integer is the only numerical response type)

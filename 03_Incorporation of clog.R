@@ -5,18 +5,48 @@ library(openxlsx)
 library(cleaningtools)
 
 
-raw_dataset <- read_excel("input/cleaned/hh_roster/hh_roster_raw.xlsx",sheet = "Sheet3")
-clean_data <- read_excel("input/cleaned/hh_roster/hh_roster_cleaned.xlsx",sheet = "Sheet3")
-clogs <- read_excel("input/cleaned/hh_roster/roster_clog.xlsx")
+raw_dataset <- read_csv("03_output/raw_data/raw_kobo_output.csv")
+
+####################################################################################
+##################### read in all the clogs ########################
+####################################################################################
+
+# Define directory pattern
+dir_path <- "01_cleaning_logs/omar/omar_complete_validated"
+
+
+all_files <- list.files(
+  path = dir_path,
+  recursive = TRUE,
+  full.names = TRUE
+)
+
+
+# Function to read and convert all columns to character
+read_and_clean <- function(file, sheet) {
+  read_excel(file, sheet = sheet) %>%
+    mutate(across(everything(), as.character))  # Convert all columns to character
+}
+
+
+# Read and combine, adding file path as an `id` column
+cleaning_logs <- map_dfr(all_files, function(file) {
+  read_and_clean(file, sheet = "cleaning_log") %>%
+    mutate(file_path = file)
+})
+
+
+cleaning_logs <- cleaning_logs %>%
+  mutate(question = ifelse(question == "hh_size_roster", "hh_roster_count", question))
 
 
 #######################################################################################
 ############################## Review the cleaning logs ###############################
 #######################################################################################
 
-review_clog <- review_cleaning_log(raw_dataset,
+review_clog <- cleaningtools::review_cleaning_log(raw_dataset,
                                    raw_data_uuid_column = "uuid",
-                                   clogs,
+                                   cleaning_log = cleaning_logs,
                                    cleaning_log_uuid_column = "uuid",
                                    cleaning_log_question_column = "question",
                                    cleaning_log_new_value_column = "new_value",
@@ -55,7 +85,6 @@ clean_data <- create_clean_data(raw_dataset,
 ############################### Removing any clog entries associated with deleted surveys ################################
 ##########################################################################################################################
 
-"%!in%" <- Negate("%in%")
 clog_input_from_surveys_not_removed <- filter(clogs, uuid %!in% deletion_from_clogs$uuid)
 
 #######################################################################################################

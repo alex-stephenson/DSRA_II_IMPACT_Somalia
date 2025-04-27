@@ -14,28 +14,28 @@ library(lubridate)
 library(shiny)
 library(shinydashboard)
 library(reactable)
-library(openxlsx)
+
+print("----------PACAKAGES SUCCESSFULLY LOADED-----------------")
 
 ### read in relevant data
-site_data <- read.csv(here::here("04_tool", "239_site_lookup.csv"))
+message("Loading site data...")
+site_data <- read.csv("04_tool/239_site_lookup.csv")
 
 
 ### raw data
 #raw_kobo_data <- read_csv("03_output/raw_data/raw_kobo_output.csv")
 
 ### clean data
-clean_data_list <- file.info(list.files("03_output/daily_cleaned_data/", full.names = T))
-latest_file <- rownames(clean_data_list)[which.max(clean_data_list$mtime)]
-clean_data_raw <- readxl::read_excel(latest_file)
 
-clean_data <- clean_data_raw %>% 
-  mutate(idp_hc_code = ifelse(is.na(idp_code), village, idp_code)) %>%
-  left_join(site_data, by = "idp_code") %>%
-  relocate(site_name, .after = idp_code) %>%
-  relocate(idp_hc_code, .before = idp_code) %>% 
-  mutate(site_name = ifelse(is.na(site_name), village, site_name))
+message("Loading cleaned data...")
 
-rm(clean_data_raw)
+tryCatch({
+  clean_data <- readxl::read_excel("03_output/daily_cleaned_data/all_clean_data_dashboard.xlsx")
+}, error = function(e) {
+  message("❌ Failed to load clean Kobo data: ", e$message)
+})
+
+message("successfully loaded clean data")
 
 ### deletion log
 
@@ -44,6 +44,9 @@ all_dlogs <- readxl::read_excel("03_output/deletion_log/deletion_log.xlsx")
 manual_dlog <- readxl::read_excel("03_output/deletion_log_manual/DSRA_II_Manual_Deletion_Log.xlsx")
 
 all_dlogs <- rbind(all_dlogs, manual_dlog)
+
+print("----------DATA SUCCESSFULLY LOADED-----------------")
+
 
 ### Sampling data
 ## over sampling
@@ -92,18 +95,19 @@ KIIs_Done <- sampling_df %>%
   left_join(sites_done %>% select(idp_code, surveys_done)) %>%
   left_join((fo_district_mapping %>% select(-district_name)), by = join_by("district")) %>%
   filter(group == "Core 189" | (group == "Buffer 50" & surveys_done > 0) | (group == "Host Community")) %>%
+  filter(idp_code != "CCCM-SO2401-0897") %>% 
   mutate(surveys_done = replace_na(surveys_done, 0)) %>%
   rename(total_surveys = sample_size) %>%
   select(fo, idp_code, site_name, district_name, surveys_done, total_surveys) %>%
   mutate(Complete = ifelse(surveys_done >= total_surveys, "Yes", "No"))
 
 KIIs_Done %>%
-  writexl::write_xlsx(., "03_output/completion_report/completion_report.xlsx")
+  writexl::write_xlsx(., paste0("03_output/completion_report/completion_report_", today(), ".xlsx"))
 
 ## Completion by FO
 
 completion_by_FO <- KIIs_Done %>%
-  group_by(fo) %>%
+  group_by(district_name) %>%
   summarise(total_surveys = sum(total_surveys),
             total_done = sum(surveys_done)) %>%
   mutate(Completion_Percent = round((total_done / total_surveys) * 100, 1)) %>%
@@ -111,7 +115,7 @@ completion_by_FO <- KIIs_Done %>%
 
 ### OPZ burndown
 # Parameters for the ideal burndown chart
-total_tasks <- 11710
+total_tasks <- sum(KIIs_Done$total_surveys)
 days <- 26
 
 # Ideal burndown data (linear decrease)
@@ -165,7 +169,6 @@ burndown <- ggplot() +
   scale_x_continuous(breaks = seq(0, max(ideal_burndown$Day), by = 2))
 
 ### enumerator performance
-
 
 deleted_data <- all_dlogs %>%
   rename(enum_phone = enum_name) %>%
@@ -260,10 +263,10 @@ server <- function(input, output, session) {
   
   # Bar Chart for Completion by FO
   output$plot_completion_by_FO <- renderPlot({
-    ggplot(completion_by_FO, aes(x = reorder(fo, -Completion_Percent), y = Completion_Percent, fill = fo)) +
+    ggplot(completion_by_FO, aes(x = reorder(district_name, -Completion_Percent), y = Completion_Percent, fill = district_name)) +
       geom_col(show.legend = FALSE, width = 0.6) +
       geom_text(aes(label = paste0(Completion_Percent, "%")), vjust = -0.5, size = 5) +
-      labs(title = "Completion by FO", x = "Field Officer", y = "Completion Percentage") +
+      labs(title = "Completion by District", x = "District", y = "Completion Percentage") +
       theme_minimal() +
       theme(
         plot.title = element_text(hjust = 0.5, size = 16, face = "bold"),
