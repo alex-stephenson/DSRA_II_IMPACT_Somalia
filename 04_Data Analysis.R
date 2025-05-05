@@ -1,8 +1,3 @@
-
-###########################################################
-########################## Setup ##########################
-###########################################################
-
 rm(list = ls())
 
 library(tidyverse)
@@ -39,10 +34,7 @@ raw_roster_data <- read_excel(file_path, 'raw_roster_data')
 cleaning_logs <- readxl::read_excel("03_output/combined_cleaning_log/combined_cleaning_log.xlsx")
 
 ## load deletion log
-all_dlogs <- readxl::read_excel(r"(03_output/deletion_log/deletion_log.xlsx)", col_types = "text")
-manual_dlog <- readxl::read_excel("03_output/deletion_log_manual/DSRA_II_Manual_Deletion_Log.xlsx", col_types = "text")
-
-deletion_log <- bind_rows(all_dlogs, manual_dlog)
+deletion_log <- read_excel("03_output/combined_cleaning_log/combined_deletion_log.xlsx")
 
 
 ## join relevant info 
@@ -86,8 +78,7 @@ main_data_weighted <- main_data %>%
   add_weights(sampling_df, 
               strata_column_dataset = "idp_hc_code",
               strata_column_sample = "idp_hc_code",
-              population_column = "population") %>% 
-  filter((idp_hc_code != "Baidoa"))
+              population_column = "population") 
 
 
 ############################### create HH survey design and analysis #################################################
@@ -134,7 +125,7 @@ df_main_analysis_table <- df_main_analysis_table %>%
 # Export the main analysis percentages table -------------------------
 presentresults::create_xlsx_variable_x_group(
   table_group_x_variable = df_main_analysis_table,
-  file_path = paste0("03_output/results_tables/results_table_long_percent.xlsx"),
+  file_path = paste0("05_HQ_validation/02_results_tables/results_table_long_percent.xlsx"),
   value_columns = c("stat","n"),
   overwrite = TRUE
 )
@@ -156,7 +147,7 @@ df_stats_table <- df_stats_table %>%
 # Export the processed stats table to Excel
 presentresults::create_xlsx_variable_x_group(
   table_group_x_variable = df_stats_table,  # Use the processed table
-  file_path = paste0("03_output/results_tables/results_table_long_values.xlsx"),
+  file_path = paste0("05_HQ_validation/02_results_tables/results_table_long_values.xlsx"),
   value_columns = c("n"),
   overwrite = TRUE  
 )
@@ -200,7 +191,7 @@ df_roster_analysis_table <- df_roster_analysis_table %>%
 # Export the main analysis percentages table -------------------------
 presentresults::create_xlsx_variable_x_group(
   table_group_x_variable = df_roster_analysis_table,
-  file_path = paste0("03_output/results_tables/roster_results_table_long_percent.xlsx"),
+  file_path = paste0("05_HQ_validation/02_results_tables/roster_results_table_long_percent.xlsx"),
   value_columns = c("stat","n"),
   overwrite = TRUE
 )
@@ -222,34 +213,61 @@ df_roster_stats_table <- df_roster_stats_table %>%
 # Export the processed stats table to Excel
 presentresults::create_xlsx_variable_x_group(
   table_group_x_variable = df_stats_table,  # Use the processed table
-  file_path = paste0("03_output/results_tables/roster_results_table_long_values.xlsx"),
+  file_path = paste0("05_HQ_validation/02_results_tables/roster_results_table_long_values.xlsx"),
   value_columns = c("n"),
   overwrite = TRUE  
 )
 
 
-#### output the final data
+####################################### output the final data ###############################################################
+
+
+readme <- data.frame(
+  Introduction = c(
+    "variable_tracker", 
+    "raw_data", 
+    "cleaned_data", 
+    "raw_roster_data",
+    "cleaned_roster",
+    "survey", 
+    "choices", 
+    "deletion_log", 
+    "cleaning_log"),
+  `Sheet Descriptions` = c(
+    "A list of all variables removed or added.",
+    "Raw data extract", 
+    "Clean data extract.", 
+    "Raw roster data",
+    "Cleaned Roster Data",
+    "Kobo survey.",
+    "Kobo choices.",
+    "All surveys deleted as part of data cleaning.",
+    "All changes made as part of the data cleaning process."
+  )
+)
+
+
 cols_to_remove <- c("consent_no", "instance_note", "deviceid", "audit", "enum_name", "note_tool", "note","idp_returned_issue",
                     "idp_not_displaced","hc_displaced","date_issues","note_date_diff", "village", "idp_code",
                     "healthcare_issue","land_tenure_check","threshold_msg_positive","threshold_msg_negative", "observation_gps", 
                     "observation_gps_latitude", "observation_gps_longitude", "observation_gps_altitude", "observation_gps_precision",
                     "observation_gps_wkt", "pt_sample_lat", "pt_sample_lon", "distance_to_site",
                      "_submission_time", "_validation_status", "Longitude", "Latitude", "attachments", "instanceID",
-                    "_notes", "_status", "_submitted_by", "__version__", "_tags", "_index", "audit_URL")
+                    "_notes", "_status", "_submitted_by", "__version__", "_tags", "_index", "audit_URL", "interview_duration")
 
-raw_data_no_pii <- raw_kobo_data %>% 
-  select(-any_of(cols_to_remove))
+raw_data <- raw_data %>% 
+  select(-idp_hc_code)
+
+raw_data_no_pii <- raw_data %>% 
+  select(-any_of(cols_to_remove)) %>% 
 
 main_data_weighted_no_pii <- main_data_weighted %>% 
   select(-any_of(cols_to_remove))
 
-variable_tracker <- ImpactFunctions::create_variable_tracker(raw_kobo_data, main_data_weighted_no_pii)
-
-data_output <- list(raw_data = raw_data_no_pii, cleaned_data = main_data_weighted_no_pii, raw_roster_data = raw_roster_data, clean_roster = clean_roster)
-writexl::write_xlsx(final_output, "05_HQ_validation/01_all_data/clean_and_raw_data.xlsx")
+variable_tracker <- ImpactFunctions::create_variable_tracker(raw_data, main_data_weighted_no_pii)
 
 log_book_output <- list(variable_tracker = variable_tracker, raw_data = raw_data_no_pii, cleaned_data = main_data_weighted_no_pii, raw_roster_data = raw_roster_data, clean_roster = clean_roster, survey = kobo_survey, choices = kobo_choice, deletion_log = deletion_log, cleaning_logs = cleaning_logs)
-writexl::write_xlsx(final_output, "05_HQ_validation/02_all_data_and_logbook/DSRA_II_all_data_logbook.xlsx")
+writexl::write_xlsx(log_book_output, "05_HQ_validation/01_all_data_and_logbook/DSRA_II_all_data_logbook.xlsx")
 
 
 

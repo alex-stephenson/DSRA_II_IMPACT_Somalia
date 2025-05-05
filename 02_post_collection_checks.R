@@ -2,7 +2,10 @@ rm(list = ls())
 ### post collection checks
 
 library(tidyverse)
+library(cleaningtools)
 library(readxl)
+
+date_time_now <- format(Sys.time(), "%b_%d_%Y_%H%M%S")
 
 ## FO data
 fo_district_mapping <- read_excel("02_input/fo_base_assignment_DSRA_II.xlsx") %>%
@@ -36,7 +39,7 @@ all_files <- list.files(
 )
 
 file_list <- all_files %>%
-  keep(~ str_detect(.x, "/[^/]+_complete/") & str_detect(.x, "cleaning_log.*\\.xlsx$") & !str_detect(.x, "report"))
+  keep(~ str_detect(.x, "/[^/]+_complete_validated/") & str_detect(.x, "cleaning_log.*\\.xlsx$") & !str_detect(.x, "report"))
 
 
 
@@ -50,16 +53,29 @@ read_and_clean <- function(file, sheet) {
 cleaning_logs <- map_dfr(file_list, sheet = 'cleaning_log', read_and_clean)
 
 cleaning_logs <- cleaning_logs %>%
-  filter(!is.na(change_type)) %>% ### this needs taking out at the end
+#  filter(!is.na(change_type)) %>% ### this needs taking out at the end
   mutate(question = ifelse(question == "hh_size_roster", "hh_roster_count", question))
 
-other_clogs <- ImpactFunctions::update_others(kobo_survey, kobo_choice, cleaning_log = cleaning_logs) %>% 
-  mutate(comment = "Updated other parent values based on clogs")
 
-cleaning_logs_amended <- cleaning_logs %>% 
-  select(uuid, question, change_type, new_value, old_value, comment = issue) %>% 
-  bind_rows(., other_clogs)
+## also check all dlogs
 
+deletion_exclusions <- read_excel("02_input/deletion_exclusions.xlsx")
+
+all_dlogs <- readxl::read_excel(r"(03_output/deletion_log/deletion_log.xlsx)", col_types = "text")
+manual_dlog <- readxl::read_excel("03_output/deletion_log_manual/DSRA_II_Manual_Deletion_Log.xlsx", col_types = "text")
+cleaning_log_deletions <- cleaning_logs %>% 
+  filter(change_type == "remove_survey") %>% 
+  mutate(interview_duration = "") %>% 
+  select(uuid, site_name, enum_name,interview_duration, comment = issue)
+
+all_deletions <- bind_rows(all_dlogs, manual_dlog) %>% 
+  bind_rows(cleaning_log_deletions) %>% 
+  filter(! uuid %in% deletion_exclusions$uuid)
+
+
+##### check others
+
+cleaning_logs_amended <- ImpactFunctions::update_others(kobo_survey, kobo_choice, cleaning_log = cleaning_logs)
 
 raw_kobo_data_nas <- raw_kobo_data %>%
   mutate(interview_duration = NA)
@@ -68,7 +84,7 @@ raw_kobo_data_nas <- raw_kobo_data %>%
 
 my_clean_data <- create_clean_data(raw_dataset = raw_kobo_data_nas,
                                    raw_data_uuid_column = "uuid",
-                                   cleaning_log = cleaning_logs, 
+                                   cleaning_log = cleaning_logs_amended, 
                                    cleaning_log_uuid_column = "uuid",
                                    cleaning_log_question_column = "question",
                                    cleaning_log_new_value_column = "new_value",
@@ -85,20 +101,16 @@ my_clean_data_parentcol <- recreate_parent_column(dataset = my_clean_data,
 
 cleaning_log <- my_clean_data_parentcol$cleaning_log
 
-
-## now remove dlog
-all_dlogs <- readxl::read_excel(r"(03_output/deletion_log/deletion_log.xlsx)")
-manual_dlog <- readxl::read_excel("03_output/deletion_log_manual/DSRA_II_Manual_Deletion_Log.xlsx") %>%
-  pull(uuid)
-
-
 my_clean_data <- my_clean_data_parentcol$data_with_fix_concat %>%
   mutate(idp_hc_code = ifelse(is.na(idp_code), village, idp_code)) %>%
-  filter(! uuid %in% all_dlogs$uuid & ! uuid %in% manual_dlog)
+  filter(! uuid %in% all_deletions$uuid)
+
 
 my_clean_roster_data <- raw_kobo_roster %>% 
   filter(parent_instance_name %in% my_clean_data$instance_name)
 
+cleaning_log_final <- cleaning_log %>% 
+  filter(! uuid %in% all_deletions$uuid)
 
 ## output everything
 
@@ -111,18 +123,21 @@ my_clean_data %>%
   select(!contains('/')) %>%
   writexl::write_xlsx(., paste0('03_output/daily_cleaned_data/all_clean_data_dashboard.xlsx'))
 
-
 all_clean_data %>% 
   writexl::write_xlsx(., "03_output/final_cleaned_data/SOM_DSRA_II_Output.xlsx")
 
-cleaning_log %>% 
+cleaning_log_final %>% 
   writexl::write_xlsx(., "03_output/combined_cleaning_log/combined_cleaning_log.xlsx")
 
+all_deletions %>% 
+  
+  writexl::write_xlsx(., "03_output/combined_cleaning_log/combined_deletion_log.xlsx")
 
 
-## only need to run it if you want
 
-## soft duplicates
+
+
+############################################# soft duplicates #####################################################
 
 ## read in already approved ones
 exclusions <- read_excel("03_output/similar_survey_checks/exclusions.xlsx")

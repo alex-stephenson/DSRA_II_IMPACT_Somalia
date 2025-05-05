@@ -39,11 +39,11 @@ message("successfully loaded clean data")
 
 ### deletion log
 
-all_dlogs <- readxl::read_excel("03_output/deletion_log/deletion_log.xlsx")
+all_dlogs <- readxl::read_excel("03_output/combined_cleaning_log/combined_deletion_log.xlsx")
 
-manual_dlog <- readxl::read_excel("03_output/deletion_log_manual/DSRA_II_Manual_Deletion_Log.xlsx")
+#manual_dlog <- readxl::read_excel("03_output/deletion_log_manual/DSRA_II_Manual_Deletion_Log.xlsx")
 
-all_dlogs <- rbind(all_dlogs, manual_dlog)
+#all_dlogs <- rbind(all_dlogs, manual_dlog)
 
 print("----------DATA SUCCESSFULLY LOADED-----------------")
 
@@ -96,6 +96,7 @@ KIIs_Done <- sampling_df %>%
   left_join((fo_district_mapping %>% select(-district_name)), by = join_by("district")) %>%
   filter(group == "Core 189" | (group == "Buffer 50" & surveys_done > 0) | (group == "Host Community")) %>%
   filter(idp_code != "CCCM-SO2401-0897") %>% 
+  filter(idp_code != "CCCM-SO2401-0295") %>% 
   mutate(surveys_done = replace_na(surveys_done, 0)) %>%
   rename(total_surveys = sample_size) %>%
   select(fo, idp_code, site_name, district_name, surveys_done, total_surveys) %>%

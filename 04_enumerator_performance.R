@@ -1,2 +1,0 @@
-## enumerator performance
-

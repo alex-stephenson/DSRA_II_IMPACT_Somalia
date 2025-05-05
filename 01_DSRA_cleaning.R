@@ -7,8 +7,8 @@ library(readxl)
 library(openxlsx)
 library(ImpactFunctions)
 
-## get the timestamp to more easily keep track of different versions
 date_time_now <- format(Sys.time(), "%b_%d_%Y_%H%M%S")
+
 
 raw_kobo <- ImpactFunctions::get_kobo_data(asset_id = "aBfWuR6hn3cdMJDLRyTVKD", un = "abdirahmanaia")
 
@@ -100,6 +100,7 @@ write_rds(raw_metadata_length, "03_output/raw_data/raw_metadata.rds")
 
 
 
+
 data_in_processing <- data_in_processing %>%
   mutate(length_valid = case_when(
     interview_duration < mindur ~ "Too short",
@@ -119,7 +120,6 @@ data_in_processing %>%
   writexl::write_xlsx(., paste0('03_output/time_checks/time_check.xlsx'))
 
 
-################update the above code and added site name and enumerator code to facilitate FO to identify easily.(date changes occured/10/04/25)
 data_in_processing %>%
   filter(length_valid != "Okay") %>% 
   select(uuid, site_name, enum_name, interview_duration) %>%
@@ -129,7 +129,7 @@ data_in_processing %>%
 ## filter only valid surveys and for the specific date
 data_in_processing <- data_in_processing %>%
   filter(length_valid == "Okay") %>%
-  filter(today == "2025-04-26")
+  filter(today == "2025-04-30")
 
 # ## Create GPS file
 
@@ -256,7 +256,7 @@ output <- group_by_fo %>%
                  uuid_column ="uuid",
                  log_name ="duration_log",
                  lower_bound = mindur_flag,
-                 higher_bound = maxdur_flag) %>%
+                higher_bound = maxdur_flag) %>%
   cleaningtools::check_logical_with_list(.,
                                          uuid_column = "uuid",
                                          list_of_check = check_list,
@@ -283,9 +283,6 @@ cleaning_log <- output %>%
 # cleaning_log: all of the issues spotted with the original value, question, uuid, and issue. Also some pretty colors
 # readme: explanations of different actions we could take to remedy the data issues found
 
-# write to each FO's cleaning log folder
-
-
 
 cleaning_log %>% 
   purrr::map(~ create_xlsx_cleaning_log(.[], 
@@ -310,17 +307,5 @@ cleaning_log %>%
                                                                             "_",
                                                                             date_time_now,
                                                                             ".xlsx")))
-
-
-
-
-
-
-
-
-
-
-
-
 
 
