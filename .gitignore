@@ -8,3 +8,5 @@
 *.xlsx
 rsconnect/
 app_deploy.R
+*.pdf
+*.rds

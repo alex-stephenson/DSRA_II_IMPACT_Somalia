@@ -4,6 +4,7 @@ library(tidyverse)
 library(cleaningtools)
 library(analysistools)
 library(presentresults)
+library(readxl)
 
 ##############################################################################
 ########################## Load the Data and Survey ##########################
@@ -34,7 +35,8 @@ raw_roster_data <- read_excel(file_path, 'raw_roster_data')
 cleaning_logs <- readxl::read_excel("03_output/combined_cleaning_log/combined_cleaning_log.xlsx")
 
 ## load deletion log
-deletion_log <- read_excel("03_output/combined_cleaning_log/combined_deletion_log.xlsx")
+deletion_log <- read_excel("03_output/combined_cleaning_log/combined_deletion_log.xlsx") %>% 
+  distinct(uuid, .keep_all = T)
 
 
 ## join relevant info 
@@ -248,7 +250,7 @@ readme <- data.frame(
 
 
 cols_to_remove <- c("consent_no", "instance_note", "deviceid", "audit", "enum_name", "note_tool", "note","idp_returned_issue",
-                    "idp_not_displaced","hc_displaced","date_issues","note_date_diff", "village", "idp_code",
+                    "idp_not_displaced","hc_displaced","date_issues","note_date_diff",
                     "healthcare_issue","land_tenure_check","threshold_msg_positive","threshold_msg_negative", "observation_gps", 
                     "observation_gps_latitude", "observation_gps_longitude", "observation_gps_altitude", "observation_gps_precision",
                     "observation_gps_wkt", "pt_sample_lat", "pt_sample_lon", "distance_to_site",
@@ -259,14 +261,15 @@ raw_data <- raw_data %>%
   select(-idp_hc_code)
 
 raw_data_no_pii <- raw_data %>% 
-  select(-any_of(cols_to_remove)) %>% 
+  select(-any_of(cols_to_remove))
 
 main_data_weighted_no_pii <- main_data_weighted %>% 
-  select(-any_of(cols_to_remove))
+  select(-any_of(cols_to_remove)) %>% 
+  select(-village, -idp_code)
 
 variable_tracker <- ImpactFunctions::create_variable_tracker(raw_data, main_data_weighted_no_pii)
 
-log_book_output <- list(variable_tracker = variable_tracker, raw_data = raw_data_no_pii, cleaned_data = main_data_weighted_no_pii, raw_roster_data = raw_roster_data, clean_roster = clean_roster, survey = kobo_survey, choices = kobo_choice, deletion_log = deletion_log, cleaning_logs = cleaning_logs)
+log_book_output <- list(README = readme, variable_tracker = variable_tracker, raw_data = raw_data_no_pii, cleaned_data = main_data_weighted_no_pii, raw_roster_data = raw_roster_data, clean_roster = clean_roster, survey = kobo_survey, choices = kobo_choice, deletion_log = deletion_log, cleaning_logs = cleaning_logs)
 writexl::write_xlsx(log_book_output, "05_HQ_validation/01_all_data_and_logbook/DSRA_II_all_data_logbook.xlsx")
 
 
