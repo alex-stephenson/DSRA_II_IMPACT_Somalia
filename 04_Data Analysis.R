@@ -20,15 +20,15 @@ kobo_survey <- read_excel(kobo_tool_name, sheet = "survey") %>%
   mutate(`label::English (en)` = ifelse(`label::English (en)` == "A.4 In which region is the assessment being conducted?" & type == "calculate", "", `label::English (en)`))
 
 kobo_choice <- read_excel(kobo_tool_name, sheet = "choices") %>% 
-  filter(list_name != "land_ownership" & is.na(code))
+  filter(list_name != "land_ownership" | list_name == "land_ownership" & is.na(code))
 
 # load datasets for processing
 file_path <- "03_output/final_cleaned_data/SOM_DSRA_II_Output.xlsx"
-main_data <- read_excel(file_path, 'clean_HH_data') %>%
+main_data <- read_excel(file_path, 'clean_HH_data', guess_max =  10000) %>%
   mutate(hh_size = as.numeric(hh_size))
-clean_roster <- read_excel(file_path, 'clean_roster_data')
-raw_data <- read_excel(file_path, 'raw_HH_data')
-raw_roster_data <- read_excel(file_path, 'raw_roster_data')
+clean_roster <- read_excel(file_path, 'clean_roster_data', guess_max =  10000)
+raw_data <- read_excel(file_path, 'raw_HH_data', guess_max =  10000)
+raw_roster_data <- read_excel(file_path, 'raw_roster_data', guess_max =  10000)
 
 
 ## load cleaning_logs
@@ -108,10 +108,12 @@ results_table_labeled <- add_label_columns_to_results_table(
   label_dictionary
 )
 
+
 #### create long output tables::
 
 ### percentage tables
 df_main_analysis_table <- presentresults::create_table_variable_x_group(
+  analysis_key = "label_analysis_key",
   results_table = results_table_labeled, 
   value_columns = "stat")
 
@@ -179,7 +181,8 @@ roster_results_table_labeled <- add_label_columns_to_results_table(
 
 ### percentage tables
 df_roster_analysis_table <- presentresults::create_table_variable_x_group(
-  results_table = roster_results_table_labeled, 
+  analysis_key = "label_analysis_key",
+    results_table = roster_results_table_labeled, 
   value_columns = "stat")
 
 # Replace NA values in list columns with NULL
@@ -202,6 +205,7 @@ presentresults::create_xlsx_variable_x_group(
 # Create and process the statistics table (counts: n, N, weighted) ----
 
 df_roster_stats_table <- presentresults::create_table_variable_x_group(
+  analysis_key = "label_analysis_key",
   results_table = roster_results_table_labeled,
   value_columns = c("n")
 )
@@ -214,7 +218,7 @@ df_roster_stats_table <- df_roster_stats_table %>%
 
 # Export the processed stats table to Excel
 presentresults::create_xlsx_variable_x_group(
-  table_group_x_variable = df_stats_table,  # Use the processed table
+  table_group_x_variable = df_roster_stats_table,  # Use the processed table
   file_path = paste0("05_HQ_validation/02_results_tables/roster_results_table_long_values.xlsx"),
   value_columns = c("n"),
   overwrite = TRUE  
@@ -265,12 +269,12 @@ raw_data_no_pii <- raw_data %>%
 
 main_data_weighted_no_pii <- main_data_weighted %>% 
   select(-any_of(cols_to_remove)) %>% 
-  select(-village, -idp_code)
+  select(-village, -idp_code, -reasons_why_far)
 
 variable_tracker <- ImpactFunctions::create_variable_tracker(raw_data, main_data_weighted_no_pii)
 
 log_book_output <- list(README = readme, variable_tracker = variable_tracker, raw_data = raw_data_no_pii, cleaned_data = main_data_weighted_no_pii, raw_roster_data = raw_roster_data, clean_roster = clean_roster, survey = kobo_survey, choices = kobo_choice, deletion_log = deletion_log, cleaning_logs = cleaning_logs)
-writexl::write_xlsx(log_book_output, "05_HQ_validation/01_all_data_and_logbook/DSRA_II_all_data_logbook.xlsx")
+writexl::write_xlsx(log_book_output, "05_HQ_validation/01_all_data_and_logbook/DSRA_II_all_data_logbook_v2.xlsx")
 
 
 

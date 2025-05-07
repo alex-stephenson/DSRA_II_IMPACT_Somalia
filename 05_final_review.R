@@ -1,3 +1,7 @@
+library(readxl)
+library(magrittr)
+library(cleaningtools)
+
 final_check_path <- "05_HQ_validation/01_all_data_and_logbook/DSRA_II_all_data_logbook.xlsx"
 
 raw_data <- read_excel(final_check_path, "raw_data")
@@ -33,3 +37,19 @@ cleaningtools::check_pii(deletion_log)
 
 cleaningtools::check_pii(cleaning_logs)
 
+
+### 
+
+others <- cleaned_data %>% 
+  dplyr::select(contains('other')) 
+  
+  
+df_roster_analysis_table <- df_roster_analysis_table %>%
+  mutate(across(where(is.list), ~ map(.x, ~ ifelse(is.na(.x), list(NULL), .x)))) %>% 
+
+
+  # Count NA values in each column using base R and lapply
+na_counts_dplyr <- others %>%
+  summarise_all(~ sum(is.na(.)))
+
+                

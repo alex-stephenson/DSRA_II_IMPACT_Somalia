@@ -12,7 +12,7 @@ fo_district_mapping <- read_excel("02_input/fo_base_assignment_DSRA_II.xlsx") %>
   select(district_name = district, "district" = district_p_code, "fo" = fo_in_charge_for_code) 
 
 ## raw data
-raw_kobo_data <- read_csv("03_output/raw_data/raw_kobo_output.csv")
+raw_kobo_data <- read_csv("03_output/raw_data/raw_kobo_output.csv", guess_max = 10000)
 
 raw_kobo_roster <-  read_csv("03_output/raw_data/raw_roster_output.csv")
 
@@ -38,15 +38,17 @@ all_files <- list.files(
   full.names = TRUE
 )
 
+## this is to only keep the files in a folder with _complete_validated/ in the title. But you can adjust to remove any as required.
 file_list <- all_files %>%
-  keep(~ str_detect(.x, "/[^/]+_complete_validated/") & str_detect(.x, "cleaning_log.*\\.xlsx$") & !str_detect(.x, "report"))
+  keep(~ (str_detect(.x, "/[^/]+_complete_validated/") & str_detect(.x, "cleaning_log.*\\.xlsx$") & !str_detect(.x, "report")))
 
 
 
 # Function to read and convert all columns to character
 read_and_clean <- function(file, sheet) {
   read_excel(file, sheet = sheet) %>%
-    mutate(across(everything(), as.character))  # Convert all columns to character
+    mutate(across(everything(), as.character))  %>%  # Convert all columns to character
+    mutate(file_path = file)
 }
 
 # Read and combine all files into a single dataframe
@@ -55,7 +57,6 @@ cleaning_logs <- map_dfr(file_list, sheet = 'cleaning_log', read_and_clean)
 cleaning_logs <- cleaning_logs %>%
 #  filter(!is.na(change_type)) %>% ### this needs taking out at the end
   mutate(question = ifelse(question == "hh_size_roster", "hh_roster_count", question))
-
 
 ## also check all dlogs
 

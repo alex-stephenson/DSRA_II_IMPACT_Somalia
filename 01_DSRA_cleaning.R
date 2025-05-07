@@ -33,9 +33,19 @@ if (version_count > 1) {
 
 raw_kobo_data <- raw_kobo_data %>% 
   mutate(village = if_else(village == "Kismaayo" & enum_name == "27407" & today == "2025-04-20", "Luglaaw", village)) %>% 
-  mutate(idp_code = ifelse(idp_code == "CCCM-SO2401-0415", "CCCM-SO2401-0416", idp_code))
-
-
+  mutate(idp_code = ifelse(idp_code == "CCCM-SO2401-0415", "CCCM-SO2401-0416", idp_code)) %>% 
+  mutate(if_access_drinking_water_other = case_when(
+    `_uuid` == "b601ec13-b86e-4ebd-8fdc-a836fa62eb3a" ~ "no drinking water",
+    `_uuid` == "1cb289cd-6f51-475c-bffc-46fbc4e7a37e" ~ "no drinking water",
+    `_uuid` == "f6ad80ff-0d53-409b-aa75-26586ba9556f" ~ "no drinking water",
+    `_uuid` == "c6209980-6345-4901-b985-9879bad04885" ~ "no drinking water",
+    `_uuid` == "c02c1195-d710-4e3b-9f9c-523827fcef78" ~ "no drinking water",
+    `_uuid` == "b92eeff3-7fec-4911-b10b-ecae421b6d6d" ~ "no drinking water",
+    `_uuid` == "400956ae-e41b-4fc1-8e05-5866d0504cb4" ~ "no drinking water",
+    `_uuid` == "23e5c280-110d-46d4-882b-24b6a075fc44" ~ "no drinking water",
+    `_uuid` == "ba6c3bc7-0bd5-4cae-8826-8f92891fb39a" ~ "no drinking water",
+    TRUE ~ if_access_drinking_water_other  # default: keep old value
+  ))
 
 ###renaming uuid
 raw_kobo_data<- raw_kobo_data %>%
@@ -75,9 +85,9 @@ fo_district_mapping <- read_excel("02_input/fo_base_assignment_DSRA_II.xlsx") %>
   select(district = district_p_code, fo_in_charge = fo_in_charge_for_code)
 
 # # join the fo to the dataset
- data_in_processing <- data_in_processing %>%
-   left_join(fo_district_mapping, by = "district")
- 
+data_in_processing <- data_in_processing %>%
+  left_join(fo_district_mapping, by = "district")
+
 # set the minimum and maximum "reasonable" survey times. Anything outside of this will be flagged
 ####Calculate time
 uuid <- "uuid"
@@ -173,29 +183,29 @@ data_in_processing <- data_in_processing %>%
 
 ## logical checks
 {
-check_list<-data.frame(name=c("healthcare_coverage is yes and no obstacles",
-                              "securit_considerations in main_cause_displacement and no  relative_safety in main_reasons ",
-                              "main_cause_displacement&obstacles_access_hcs_xx",
-                              "main_cause_displacement&obstacles_access_hcs_yy",
-                              "main_cause_displacement&obstacles_access_hcs_zz",
-                              "main_cause_displacement&obstacles_access_hcs_vv",
-                              "main_cause_displacement&obstacles_access_hcs_mm",
-                              "main_cause_displacement&obstacles_access_hcs_oo",
-                              "hh_size and roster size",
-                              "HH_roster_edu_vs_highest_edu_level"),
-                       check_to_perform =c("grepl(\"*no*\", healthcare_coverage) & grepl(\"*no_issues*\", obstacles_access_hcs)",
-                                           "grepl(\"*securit_considerations*\", main_cause_displacement) &!grepl(\"*relative_safety*\", main_reasons)",
-                                           "grepl(\"*economic_migration*\", main_cause_displacement) &!grepl(\"*economic_migration_current_settlement_name*\", main_reasons)",
-                                           "grepl(\"*bad_standards_living*\", main_cause_displacement) &!grepl(\"*better_standard_living*\", main_reasons)",
-                                           "grepl(\"*discrimination*\", main_cause_displacement) &!grepl(\"*feeling_community*\", main_reasons)",
-                                           "grepl(\"*lack_humanitarian_aid*\", main_cause_displacement) &!grepl(\"*availability_humanitarian_assistance*\", main_reasons)",
-                                           "grepl(\"*far_friend_family*\", main_cause_displacement) &!grepl(\"*location_friends_family*\", main_reasons)",
-                                           "grepl(\"*other*\", main_cause_displacement) &!grepl(\"*other*\", main_reasons)",
-                                         "hh_size!=hh_size_roster",
-                                         "edu_roster_flag == TRUE"),
-                       columns_to_clean = c(
-                                            ### include all of the potential binaries from obstacles_access_hcs, which may need updating
-                                            "healthcare_coverage,
+  check_list<-data.frame(name=c("healthcare_coverage is yes and no obstacles",
+                                "securit_considerations in main_cause_displacement and no  relative_safety in main_reasons ",
+                                "main_cause_displacement&obstacles_access_hcs_xx",
+                                "main_cause_displacement&obstacles_access_hcs_yy",
+                                "main_cause_displacement&obstacles_access_hcs_zz",
+                                "main_cause_displacement&obstacles_access_hcs_vv",
+                                "main_cause_displacement&obstacles_access_hcs_mm",
+                                "main_cause_displacement&obstacles_access_hcs_oo",
+                                "hh_size and roster size",
+                                "HH_roster_edu_vs_highest_edu_level"),
+                         check_to_perform =c("grepl(\"*no*\", healthcare_coverage) & grepl(\"*no_issues*\", obstacles_access_hcs)",
+                                             "grepl(\"*securit_considerations*\", main_cause_displacement) &!grepl(\"*relative_safety*\", main_reasons)",
+                                             "grepl(\"*economic_migration*\", main_cause_displacement) &!grepl(\"*economic_migration_current_settlement_name*\", main_reasons)",
+                                             "grepl(\"*bad_standards_living*\", main_cause_displacement) &!grepl(\"*better_standard_living*\", main_reasons)",
+                                             "grepl(\"*discrimination*\", main_cause_displacement) &!grepl(\"*feeling_community*\", main_reasons)",
+                                             "grepl(\"*lack_humanitarian_aid*\", main_cause_displacement) &!grepl(\"*availability_humanitarian_assistance*\", main_reasons)",
+                                             "grepl(\"*far_friend_family*\", main_cause_displacement) &!grepl(\"*location_friends_family*\", main_reasons)",
+                                             "grepl(\"*other*\", main_cause_displacement) &!grepl(\"*other*\", main_reasons)",
+                                             "hh_size!=hh_size_roster",
+                                             "edu_roster_flag == TRUE"),
+                         columns_to_clean = c(
+                           ### include all of the potential binaries from obstacles_access_hcs, which may need updating
+                           "healthcare_coverage,
                                             obstacles_access_hcs/no_issues,
                                             obstacles_access_hcs/unable_access_medical,
                                             obstacles_access_hcs/cost_services_medicine,
@@ -212,32 +222,32 @@ check_list<-data.frame(name=c("healthcare_coverage is yes and no obstacles",
                                             obstacles_access_hcs/health_servicesnot_accessible, 
                                             obstacles_access_hcs/fear_harassment_violence_healthcare_servic, 
                                             obstacles_access_hcs/barriers_languag_health_services",#
-                                            
-                                            
-                                            
-                                            "main_cause_displacement/securit_considerations, main_reasons/relative_safety",
-                                            "main_cause_displacement/economic_migration, main_reasons/economic_migration_current_settlement_name",
-                                            "main_cause_displacement/bad_standards_living, main_reasons/better_standard_living",
-                                            "main_cause_displacement/discrimination ,main_reasons/feeling_community",
-                                            "main_cause_displacement/lack_humanitarian_aid,main_reasons/availability_humanitarian_assistance",
-                                            "main_cause_displacement/far_friend_family,main_reasons/location_friends_family",
-                                            "main_cause_displacement/other,main_reasons/other",
-                                            
-                                            "hh_size,hh_size_roster",
-                                            
-                                            "highest_hh_education_level"),
-                       description =c( "All members of the HH doesnt have access to Healtcare but no obstacles in accessing healthcare",
-                                       "lack of security is a reason for leaving a site yet relative safety is not selected in reasons for coming to site",
-                                       "economic_migration is a reason for leaving a site yet Economic migration is not selected in reasons for coming to site",
-                                       "bad_standards_living is a reason for leaving a site yet better_standard_living is not selected in reasons for coming to site",
-                                       "discrimination is a reason for leaving a site yet feeling_community is not selected in reasons for coming to site",
-                                       "lack_humanitarian_aid is a reason for leaving a site yet availability_humanitarian_assistance is not selected in reasons for coming to site",
-                                       "far_friend_family is a reason for leaving a site yet location_friends_family is not selected in reasons for coming to site",
-                                       "other is a reason for leaving a site yet other is not selected in reasons for coming to site",
-                                       "hh_size is different  from the number of people in the HH roster",
-                                       "The highest level of education provided in the roster is higher than the highest level of education given for the household. See column 'roster_max_school_attend', and change the answer to be less than this")
-)
-}
+                           
+                           
+                           
+                           "main_cause_displacement/securit_considerations, main_reasons/relative_safety",
+                           "main_cause_displacement/economic_migration, main_reasons/economic_migration_current_settlement_name",
+                           "main_cause_displacement/bad_standards_living, main_reasons/better_standard_living",
+                           "main_cause_displacement/discrimination ,main_reasons/feeling_community",
+                           "main_cause_displacement/lack_humanitarian_aid,main_reasons/availability_humanitarian_assistance",
+                           "main_cause_displacement/far_friend_family,main_reasons/location_friends_family",
+                           "main_cause_displacement/other,main_reasons/other",
+                           
+                           "hh_size,hh_size_roster",
+                           
+                           "highest_hh_education_level"),
+                         description =c( "All members of the HH doesnt have access to Healtcare but no obstacles in accessing healthcare",
+                                         "lack of security is a reason for leaving a site yet relative safety is not selected in reasons for coming to site",
+                                         "economic_migration is a reason for leaving a site yet Economic migration is not selected in reasons for coming to site",
+                                         "bad_standards_living is a reason for leaving a site yet better_standard_living is not selected in reasons for coming to site",
+                                         "discrimination is a reason for leaving a site yet feeling_community is not selected in reasons for coming to site",
+                                         "lack_humanitarian_aid is a reason for leaving a site yet availability_humanitarian_assistance is not selected in reasons for coming to site",
+                                         "far_friend_family is a reason for leaving a site yet location_friends_family is not selected in reasons for coming to site",
+                                         "other is a reason for leaving a site yet other is not selected in reasons for coming to site",
+                                         "hh_size is different  from the number of people in the HH roster",
+                                         "The highest level of education provided in the roster is higher than the highest level of education given for the household. See column 'roster_max_school_attend', and change the answer to be less than this")
+  )
+  }
 
 ##group data by FO
 group_by_fo <- data_in_processing %>%
@@ -247,23 +257,23 @@ group_by_fo <- data_in_processing %>%
 output <- group_by_fo %>%
   dplyr::group_split() %>%
   purrr::map( ~cleaningtools::check_others(
-  dataset = .,
-  uuid_column = "uuid",
-  columns_to_check = names(data_in_processing|>
-                             dplyr::select(ends_with("_other")) |>
-                             dplyr::select(-contains(".")))) %>% 
-  check_duration(column_to_check ="interview_duration",
-                 uuid_column ="uuid",
-                 log_name ="duration_log",
-                 lower_bound = mindur_flag,
-                higher_bound = maxdur_flag) %>%
-  cleaningtools::check_logical_with_list(.,
-                                         uuid_column = "uuid",
-                                         list_of_check = check_list,
-                                         check_id_column = "name",
-                                         check_to_perform_column = "check_to_perform",
-                                         columns_to_clean_column = "columns_to_clean",
-                                         description_column = "description"))
+    dataset = .,
+    uuid_column = "uuid",
+    columns_to_check = names(data_in_processing|>
+                               dplyr::select(ends_with("_other")) |>
+                               dplyr::select(-contains(".")))) %>% 
+      check_duration(column_to_check ="interview_duration",
+                     uuid_column ="uuid",
+                     log_name ="duration_log",
+                     lower_bound = mindur_flag,
+                     higher_bound = maxdur_flag) %>%
+      cleaningtools::check_logical_with_list(.,
+                                             uuid_column = "uuid",
+                                             list_of_check = check_list,
+                                             check_id_column = "name",
+                                             check_to_perform_column = "check_to_perform",
+                                             columns_to_clean_column = "columns_to_clean",
+                                             description_column = "description"))
 
 
 
@@ -286,26 +296,25 @@ cleaning_log <- output %>%
 
 cleaning_log %>% 
   purrr::map(~ create_xlsx_cleaning_log(.[], 
-                                                       cleaning_log_name = "cleaning_log",
-                                                       change_type_col = "change_type",
-                                                       column_for_color = "check_binding",
-                                                       header_front_size = 10,
-                                                       header_front_color = "#FFFFFF",
-                                                       header_fill_color = "#ee5859",
-                                                       header_front = "Calibri",
-                                                       body_front = "Calibri",
-                                                       body_front_size = 10,
-                                                       use_dropdown = T,
-                                                       sm_dropdown_type = "numerical",
-                                                       kobo_survey = kobo_survey,
-                                                       kobo_choices = kobo_choice,
-                                                       output_path = paste0("01_cleaning_logs/",
-                                                                            unique(.[]$checked_dataset$fo_in_charge),
-                                                                            "/",
-                                                                            "cleaning_log_",
-                                                                            unique(.[]$checked_dataset$fo_in_charge),
-                                                                            "_",
-                                                                            date_time_now,
-                                                                            ".xlsx")))
-
+                                        cleaning_log_name = "cleaning_log",
+                                        change_type_col = "change_type",
+                                        column_for_color = "check_binding",
+                                        header_front_size = 10,
+                                        header_front_color = "#FFFFFF",
+                                        header_fill_color = "#ee5859",
+                                        header_front = "Calibri",
+                                        body_front = "Calibri",
+                                        body_front_size = 10,
+                                        use_dropdown = T,
+                                        sm_dropdown_type = "numerical",
+                                        kobo_survey = kobo_survey,
+                                        kobo_choices = kobo_choice,
+                                        output_path = paste0("01_cleaning_logs/",
+                                                             unique(.[]$checked_dataset$fo_in_charge),
+                                                             "/",
+                                                             "cleaning_log_",
+                                                             unique(.[]$checked_dataset$fo_in_charge),
+                                                             "_",
+                                                             date_time_now,
+                                                             ".xlsx")))
 
