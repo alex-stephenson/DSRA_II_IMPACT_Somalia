@@ -76,6 +76,14 @@ sampling_df <- bind_rows(sampling_df_idp,sampling_df_hc) %>%
   filter(idp_hc_code %in% main_data$idp_hc_code)
 
 
+actual_sampled <- main_data %>% 
+  count(idp_hc_code, name = "sample_size")
+
+sampling_df<- sampling_df %>% 
+  select(-sample_size) %>% 
+  left_join(actual_sampled)
+
+
 main_data_weighted <- main_data %>%
   add_weights(sampling_df, 
               strata_column_dataset = "idp_hc_code",
@@ -139,6 +147,7 @@ presentresults::create_xlsx_variable_x_group(
 
 df_stats_table <- presentresults::create_table_variable_x_group(
   results_table = results_table_labeled,
+  analysis_key = "label_analysis_key",
   value_columns = c("n")
 )
 
@@ -156,8 +165,9 @@ presentresults::create_xlsx_variable_x_group(
   overwrite = TRUE  
 )
 
-
+#------------------------------------------------------------------------------------------------------------------------#
 ############################### create ROSTER survey design and analysis #################################################
+#------------------------------------------------------------------------------------------------------------------------#
 
 
 clean_roster_weighted <- clean_roster %>% 
@@ -259,7 +269,7 @@ cols_to_remove <- c("consent_no", "instance_note", "deviceid", "audit", "enum_na
                     "observation_gps_latitude", "observation_gps_longitude", "observation_gps_altitude", "observation_gps_precision",
                     "observation_gps_wkt", "pt_sample_lat", "pt_sample_lon", "distance_to_site",
                      "_submission_time", "_validation_status", "Longitude", "Latitude", "attachments", "instanceID",
-                    "_notes", "_status", "_submitted_by", "__version__", "_tags", "_index", "audit_URL", "interview_duration")
+                    "_notes", "_status", "_submitted_by", "__version__", "_tags", "_index", "audit_URL", "interview_duration", "District")
 
 raw_data <- raw_data %>% 
   select(-idp_hc_code)
@@ -273,8 +283,8 @@ main_data_weighted_no_pii <- main_data_weighted %>%
 
 variable_tracker <- ImpactFunctions::create_variable_tracker(raw_data, main_data_weighted_no_pii)
 
-log_book_output <- list(README = readme, variable_tracker = variable_tracker, raw_data = raw_data_no_pii, cleaned_data = main_data_weighted_no_pii, raw_roster_data = raw_roster_data, clean_roster = clean_roster, survey = kobo_survey, choices = kobo_choice, deletion_log = deletion_log, cleaning_logs = cleaning_logs)
-writexl::write_xlsx(log_book_output, "05_HQ_validation/01_all_data_and_logbook/DSRA_II_all_data_logbook_v2.xlsx")
+log_book_output <- list(README = readme, variable_tracker = variable_tracker, raw_data = raw_data_no_pii, cleaned_data = main_data_weighted_no_pii, raw_roster_data = raw_roster_data, clean_roster = clean_roster_weighted, survey = kobo_survey, choices = kobo_choice, deletion_log = deletion_log, cleaning_logs = cleaning_logs)
+writexl::write_xlsx(log_book_output, paste0("05_HQ_validation/01_all_data_and_logbook/DSRA_II_all_data_logbook_", today(), ".xlsx"))
 
 
 
